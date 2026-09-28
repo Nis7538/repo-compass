@@ -1,0 +1,41 @@
+[project]
+name = "repo-compass"
+version = "0.1.0"
+description = "MCP server that gives coding agents structural understanding of a codebase"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.52",
+    "mcp>=1.9",
+    "tree-sitter>=0.24",
+    "tree-sitter-java>=0.23",
+    "tree-sitter-python>=0.23",
+    "typer>=0.15",
+]
+
+[project.scripts]
+compass = "compass.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.11",
+]
+
+[tool.ruff]
+line-length = 99
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/compass"]
