@@ -9,7 +9,7 @@ def test_references_grouped_ranked_with_caller_and_context(fx_conn):
     assert find_references(fx_conn, "Order.java:25", 10).splitlines() == [
         f"method Order.add @ {SHOP}model/Order.java:25  public Order add(Item item)",
         "3 call sites in 2 files (exact 1, likely 2)",
-        "rank: exact > likely > possible, non-test first, then path:line",
+        "rank: exact > likely > possible, non-test first, new callers before repeat calls",
         f"paths under {SHOP}",
         "model/Order.java",
         "  36 exact Order.addAll: add(item);",
@@ -40,3 +40,21 @@ def test_references_none_found_explains_scope(fx_conn):
 
 def test_references_ambiguous_name_lists_candidates(fx_conn):
     assert find_references(fx_conn, "save", 10).startswith('"save" matches 4 symbols.')
+
+
+def test_first_call_from_each_caller_ranks_before_repeats(tmp_path):
+    from compass.indexer.pipeline import index_repo
+    from compass.store.db import open_index
+    from tests.stress_corpus import write_stress_repo
+
+    root = write_stress_repo(tmp_path / "repo")
+    index_repo(root, tmp_path / "i.db")
+    conn = open_index(tmp_path / "i.db")
+    try:
+        lines = find_references(conn, "Hub.process", 10).splitlines()
+    finally:
+        conn.close()
+    callers = [line.split()[2] for line in lines if line.startswith("  ")]
+    # Big.huge calls process 400 times; it gets one slot, not all ten.
+    assert len(callers) == 10
+    assert len(set(callers)) == 10

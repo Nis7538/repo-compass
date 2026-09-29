@@ -2,7 +2,8 @@
 
 Ranking, best first: confidence tier (exact > likely > possible, see
 docs/adr/003-reference-resolution.md), then production code before tests, then
-path and line. The header always gives the full totals, so a truncated answer
+the first call site of each calling symbol before its repeats, then path and
+line. The header always gives the full totals, so a truncated answer
 still says how many call sites exist, in how many files, and how sure we are.
 The truncation marker also names the files holding most of the cut call sites.
 """
@@ -33,10 +34,7 @@ def find_references(conn: sqlite3.Connection, symbol: str, limit: int) -> str:
         f"{s.kind} {short_name(s)} @ {s.path}:{s.start_line}  {clip(s.signature, SIGNATURE_WIDTH)}"
     ]
 
-    refs = sorted(
-        Resolver(conn).find_references(s),
-        key=lambda r: (-RANK[r.confidence], is_test_path(r.ref.path), r.ref.path, r.ref.line),
-    )
+    refs = rank_references(Resolver(conn).find_references(s))
     if not refs:
         head.append(
             "No call sites found. Only calls and `new` are indexed, not type usages,"
@@ -49,7 +47,7 @@ def find_references(conn: sqlite3.Connection, symbol: str, limit: int) -> str:
         f"{len(refs)} call site{'s' if len(refs) != 1 else ''} in {len(files)} "
         f"file{'s' if len(files) != 1 else ''} ({_tiers(refs)})"
     )
-    head.append("rank: exact > likely > possible, non-test first, then path:line")
+    head.append("rank: exact > likely > possible, non-test first, new callers before repeat calls")
 
     wanted = refs[:limit]
     entries = [Entry(r.ref.path, text) for r, text in zip(wanted, _entry_texts(conn, wanted))]
@@ -66,6 +64,32 @@ def find_references(conn: sqlite3.Connection, symbol: str, limit: int) -> str:
             truncated(len(dropped), detail, more_hint(len(refs), shown, limit, MAX_LIMIT))
         )
     return "\n".join(lines)
+
+
+def rank_references(refs: list[Reference]) -> list[Reference]:
+    """Best first: tier, production before tests, first call from each caller, location.
+
+    "Who calls X" is answered by distinct callers, so a method that calls X forty
+    times must not fill the whole first page: its first call site ranks with the
+    other callers' first ones, and its repeats come after them (same tier).
+    """
+    by_location = sorted(refs, key=lambda r: (r.ref.path, r.ref.line, r.ref.col))
+    seen: Counter = Counter()
+    repeat: dict[int, int] = {}
+    for r in by_location:
+        caller = (r.ref.file_id, r.ref.enclosing_symbol_id)
+        repeat[r.ref.id] = seen[caller]
+        seen[caller] += 1
+    return sorted(
+        by_location,
+        key=lambda r: (
+            -RANK[r.confidence],
+            is_test_path(r.ref.path),
+            repeat[r.ref.id] > 0,
+            r.ref.path,
+            r.ref.line,
+        ),
+    )
 
 
 def _tiers(refs: list[Reference]) -> str:
