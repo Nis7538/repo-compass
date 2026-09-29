@@ -1,0 +1,2 @@
+# Fixture line/column numbers are asserted in tests; keep them identical on every OS.
+fixtures/** text eol=lf

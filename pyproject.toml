@@ -32,6 +32,7 @@ select = ["E", "F", "I", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: takes seconds, not milliseconds (deselect with -m 'not slow')"]
 
 [build-system]
 requires = ["hatchling"]
