@@ -163,9 +163,11 @@ java/shop/src/main/java/com/example/shop/model/Order.java (java, 83 lines, modul
 
 The import graph between modules: Java packages and Python modules. Edge weight is the
 number of import statements. External modules are collapsed (`java.util`, `requests`).
-Cycles are strongly connected components, largest first, each shown as one concrete loop
-(`cycle among 13 modules, e.g. a -> b -> a` when the loop doesn't pass through every
-member).
+Cycles are strongly connected components, largest first, each shown as one concrete loop.
+After each step, the loop names one import statement that creates that edge
+(`a -> b (A.java:12) -> a (B.java:40)`), since the next question is usually which import
+to remove. It says `cycle among 13 modules, e.g. ...` when the loop doesn't pass through
+every member.
 
 Test files are left out of the graph, and the header says how many were. Java tests
 usually live in the same packages as the code they test, so their imports would show up
@@ -182,7 +184,7 @@ module inventory.models (1 file)
 imports 2 internal: inventory.helpers 1, inventory.services 1
 imported by 3: inventory.services 4, seed 2, inventory 1
 external 3: dataclasses 1, fastjson 1, typing 1
-cycle: inventory.models -> inventory.services -> inventory.models
+cycle: inventory.models -> inventory.services (models.py:9) -> inventory.models (services.py:3)
 ```
 
 Limits: Java classes used from the same package, or written fully qualified without an

@@ -18,7 +18,9 @@ and test-only packages would otherwise show up as production dependencies and
 cycles (on apache/commons-lang they joined 16 packages into one cycle).
 
 Cycles are strongly connected components with more than one module (Tarjan),
-largest first, each shown as one concrete loop through the component.
+largest first, each shown as one concrete loop through the component. Each step
+of the loop names one import statement that creates it (file:line), because the
+next question is always "which import do I remove?".
 
 Limits: Java classes used from the same package, or written fully qualified
 without an import, create no edge. Python imports inside functions count the
@@ -45,6 +47,8 @@ class Graph:
     edges: Counter = field(default_factory=Counter)  # (src, dst) -> import statements
     external: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
     test_files: int = 0  # left out of the graph
+    # (src, dst) -> the first import statement making that edge, as 'File.java:12'
+    example: dict[tuple[str, str], str] = field(default_factory=dict)
 
 
 def build_graph(conn: sqlite3.Connection) -> Graph:
@@ -63,8 +67,9 @@ def build_graph(conn: sqlite3.Connection) -> Graph:
     }
     graph = Graph(dict(modules), test_files=len(files) - len(kept))
     rows = conn.execute(
-        "SELECT i.file_id, f.module AS src, f.language, i.module, i.name, i.is_static"
-        " FROM imports i JOIN files f ON f.id = i.file_id WHERE f.module != ''"
+        "SELECT i.file_id, i.line, f.path, f.module AS src, f.language, i.module, i.name,"
+        " i.is_static FROM imports i JOIN files f ON f.id = i.file_id WHERE f.module != ''"
+        " ORDER BY f.path, i.line"
     )
     for r in rows:
         if r["file_id"] not in kept:
@@ -74,6 +79,9 @@ def build_graph(conn: sqlite3.Connection) -> Graph:
             graph.external[r["src"]][_external_name(r["language"], r["module"])] += 1
         elif dst != r["src"]:
             graph.edges[(r["src"], dst)] += 1
+            graph.example.setdefault(
+                (r["src"], dst), f"{r['path'].rsplit('/', 1)[-1]}:{r['line']}"
+            )
     return graph
 
 
@@ -282,4 +290,9 @@ def _loop_text(graph: Graph, cycle: set[str], start: str | None = None) -> str:
         path.append(node)
         node = parents.get(node)
     loop = [start] + path[:0:-1] + [start]
-    return clip(" -> ".join(loop), CYCLE_WIDTH)
+    # After each step, where one import making that edge is: 'a -> b (A.java:12) -> a (B.py:3)'.
+    text = loop[0]
+    for src, dst in zip(loop, loop[1:]):
+        where = graph.example.get((src, dst))
+        text += f" -> {dst}" + (f" ({where})" if where else "")
+    return clip(text, CYCLE_WIDTH)

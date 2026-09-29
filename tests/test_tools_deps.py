@@ -18,7 +18,8 @@ def test_overview_lists_cycles_most_imported_and_top_edges(fx_conn):
         " (edge weight = import statements; 0 test files left out)",
         "most imported: inventory.models (by 3), inventory.helpers (by 2),"
         " com.example.shop.model (by 1), com.example.shop.util (by 1), inventory.services (by 1)",
-        "cycle: inventory.models -> inventory.services -> inventory.models",
+        "cycle: inventory.models -> inventory.services (models.py:9) -> inventory.models"
+        " (services.py:3)",
         "top edges:",
         "  inventory.services -> inventory.models 4",
         "  com.example.shop.service -> com.example.shop.model 2",
@@ -44,7 +45,8 @@ def test_python_module_in_a_cycle(fx_conn):
         "imports 2 internal: inventory.helpers 1, inventory.services 1",
         "imported by 3: inventory.services 4, seed 2, inventory 1",
         "external 3: dataclasses 1, fastjson 1, typing 1",
-        "cycle: inventory.models -> inventory.services -> inventory.models",
+        "cycle: inventory.models -> inventory.services (models.py:9) -> inventory.models"
+        " (services.py:3)",
     ]
 
 
