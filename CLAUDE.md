@@ -37,3 +37,4 @@ The full plan is in PLAN.md. Follow it milestone by milestone.
 - Tool outputs returned to agents must be size-capped and truncated with an explicit "truncated, N more" marker. Token efficiency is a core feature.
 - Read-only: this tool never modifies the target repository.
 - No proprietary or employer-related code, names, or data anywhere in this repo. Test fixtures are either written from scratch or come from permissively licensed OSS with attribution.
+- Each tool has a documented token cap enforced by a test. Never add default-on bodies or long context lines to tool output.
