@@ -72,9 +72,10 @@ docs/tools.md and `caps.py` disagree.
 There is no offline tokenizer for Claude models, and the caps must be checked in CI
 without network access or an API key. Code, paths and camelCase identifiers come to
 roughly 3 to 4 characters per token, so dividing by 3 overestimates, which is the safe
-direction for a ceiling. This is an estimate, not a measurement: `docs/e2e-m2.md` records
-what real responses cost during the Claude Code run. If it turns out to be badly off, the
-fix is one constant, `CHARS_PER_TOKEN`.
+direction for a ceiling. This is an estimate, not a measurement. It has not been
+calibrated against the real tokenizer yet: the Claude Code stream reports usage per turn,
+not per tool result, and the optional `count_tokens` calibration script was not written in
+M2. If the estimate turns out to be badly off, the fix is one constant, `CHARS_PER_TOKEN`.
 
 ### No numeric symbol ids
 PLAN.md sketched `get_symbol(id | qualified_name)`. Row ids are not stable. Reindexing a
@@ -109,5 +110,5 @@ twice: as content and as `structuredContent`. Every tool is registered with
 - Agents sometimes need one extra call: `get_symbol` after a search, or a `path:line` after
   an ambiguous name. That is the trade-off progressive disclosure makes on purpose. M5
   measures whether it pays off.
-- Caps are only as good as the estimate. They are checked against real responses in the
-  E2E write-up, not assumed.
+- Caps are only as good as the estimate. Real responses from the Claude Code run are in
+  docs/e2e-m2.md, measured with the same estimate. The largest was 1,346 against a cap of 1,500.

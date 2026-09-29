@@ -47,7 +47,8 @@ large repo may reply "index building, retry" if the build takes more than a few 
 Six read-only tools: `repo_summary`, `search_symbols`, `get_symbol`, `find_references`,
 `file_outline`, `module_dependencies`. Answers are compact text, ranked, and capped per
 tool with an explicit `[truncated: N more]` line. Formats, ranking rules and token caps:
-[docs/tools.md](docs/tools.md).
+[docs/tools.md](docs/tools.md). An end-to-end run in Claude Code on commons-lang and flask,
+including what went wrong: [docs/e2e-m2.md](docs/e2e-m2.md).
 
 ## Limitations
 
