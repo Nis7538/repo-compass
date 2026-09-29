@@ -92,7 +92,7 @@ class IndexManager:
                 False,
                 _status(
                     f"building, {elapsed:.0f}s so far (about 10s per 200k lines). Retry this"
-                    f" call in a few seconds. Repo: {self.root}"
+                    f" call in a few seconds. Repo: {self.root.name}"
                 ),
                 "building",
             )

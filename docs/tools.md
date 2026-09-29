@@ -122,7 +122,7 @@ tokens:
 
 ```
 method Order.add @ src/main/java/com/example/shop/model/Order.java:25  public Order add(Item item)
-40 call sites in 17 files (exact 4, likely 33, possible 3)
+40 call sites in 17 files (exact 4, likely 33, possible 3); 5 in 1 test file
 rank: exact > likely > possible, non-test first, new callers before repeat calls
 paths under src/main/java/com/example/shop/
 model/Order.java

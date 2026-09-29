@@ -58,3 +58,26 @@ def test_first_call_from_each_caller_ranks_before_repeats(tmp_path):
     # Big.huge calls process 400 times; it gets one slot, not all ten.
     assert len(callers) == 10
     assert len(set(callers)) == 10
+
+
+def test_header_states_how_many_call_sites_are_in_tests(tmp_path):
+    from compass.indexer.pipeline import index_repo
+    from compass.store.db import open_index
+
+    files = {
+        "src/main/java/a/Util.java": "package a;\npublic class Util {\n"
+        "    public static int one() { return 1; }\n"
+        "    int two() { return one() + one(); }\n}\n",
+        "src/test/java/a/UtilTest.java": "package a;\nclass UtilTest {\n"
+        "    void t() { Util.one(); }\n}\n",
+    }
+    for path, text in files.items():
+        (tmp_path / "repo" / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "repo" / path).write_text(text)
+    index_repo(tmp_path / "repo", tmp_path / "i.db")
+    conn = open_index(tmp_path / "i.db")
+    try:
+        lines = find_references(conn, "Util.one", 10).splitlines()
+    finally:
+        conn.close()
+    assert lines[1] == "3 call sites in 2 files (exact 3); 1 in 1 test file"

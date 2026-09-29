@@ -45,7 +45,7 @@ def find_references(conn: sqlite3.Connection, symbol: str, limit: int) -> str:
     files = {r.ref.path for r in refs}
     head.append(
         f"{len(refs)} call site{'s' if len(refs) != 1 else ''} in {len(files)} "
-        f"file{'s' if len(files) != 1 else ''} ({_tiers(refs)})"
+        f"file{'s' if len(files) != 1 else ''} ({_tiers(refs)})" + _test_share(refs)
     )
     head.append("rank: exact > likely > possible, non-test first, new callers before repeat calls")
 
@@ -90,6 +90,16 @@ def rank_references(refs: list[Reference]) -> list[Reference]:
             r.ref.line,
         ),
     )
+
+
+def _test_share(refs: list[Reference]) -> str:
+    """'; 7 in 2 test files' -- stated outright, because agents asked about production
+    callers otherwise subtract (and in the M2 end-to-end run, got it wrong)."""
+    tests = [r for r in refs if is_test_path(r.ref.path)]
+    if not tests:
+        return ""
+    files = len({r.ref.path for r in tests})
+    return f"; {len(tests)} in {files} test file{'s' if files != 1 else ''}"
 
 
 def _tiers(refs: list[Reference]) -> str:
