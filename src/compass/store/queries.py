@@ -186,6 +186,11 @@ def fts_symbols(
     return [symbol_row(r) for r in rows]
 
 
+def get_file(conn: sqlite3.Connection, file_id: int) -> FileRow | None:
+    row = conn.execute("SELECT * FROM files WHERE id = ?", (file_id,)).fetchone()
+    return file_row(row) if row else None
+
+
 def files_by_suffix(conn: sqlite3.Connection, suffix: str) -> list[FileRow]:
     """Files whose repo-relative path is suffix or ends in '/suffix'."""
     rows = conn.execute(

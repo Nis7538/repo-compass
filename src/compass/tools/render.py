@@ -38,9 +38,12 @@ def clip(text: str, width: int) -> str:
     return text if len(text) <= width else text[: width - 1] + ELLIPSIS
 
 
-def truncated(count: int, detail: str | None = None, hint: str | None = None) -> str:
+def truncated(
+    count: int, detail: str | None = None, hint: str | None = None, unit: str | None = None
+) -> str:
     """'[truncated: 30 more (likely 27, possible 3)] limit=40 shows all'."""
-    marker = f"[truncated: {count} more" + (f" ({detail})" if detail else "") + "]"
+    marker = f"[truncated: {count} more" + (f" {unit}" if unit else "")
+    marker += (f" ({detail})" if detail else "") + "]"
     return clip(marker + (f" {hint}" if hint else ""), MARKER_WIDTH)
 
 
@@ -112,6 +115,15 @@ def fit_grouped(head: list[str], entries: list[Entry], cap_tokens: int) -> tuple
         lines.append(group[len(prefix) :])
         lines.extend("  " + text for text in texts)
     return lines, shown
+
+
+def more_hint(total: int, shown: int, limit: int, max_limit: int) -> str:
+    """What to do about a cut: raise the limit, or narrow the query if the cap cut it."""
+    if shown < limit:
+        return "output cap reached; narrow the query"
+    if total <= max_limit:
+        return f"limit={total} shows all"
+    return f"limit={max_limit} shows more"
 
 
 def enforce_cap(text: str, cap_tokens: int) -> str:
