@@ -12,6 +12,10 @@ statements, weighted by how many import statements make them:
 - Anything not in the index is external, collapsed to its first two segments for
   Java (java.util) and its first segment for Python (os, requests).
 
+Python imports inside `if TYPE_CHECKING:` are left out too: they never run, and
+counting them reports import cycles that do not exist at runtime (flask's
+flask.app <-> flask.cli went through one).
+
 Test files (tools/rank.is_test_path) are left out of the graph. In Java they
 usually share packages with the code they test, and their imports of fixtures
 and test-only packages would otherwise show up as production dependencies and
@@ -47,6 +51,7 @@ class Graph:
     edges: Counter = field(default_factory=Counter)  # (src, dst) -> import statements
     external: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
     test_files: int = 0  # left out of the graph
+    type_only: int = 0  # Python imports under `if TYPE_CHECKING:`, left out
     # (src, dst) -> the first import statement making that edge, as 'File.java:12'
     example: dict[tuple[str, str], str] = field(default_factory=dict)
 
@@ -68,11 +73,15 @@ def build_graph(conn: sqlite3.Connection) -> Graph:
     graph = Graph(dict(modules), test_files=len(files) - len(kept))
     rows = conn.execute(
         "SELECT i.file_id, i.line, f.path, f.module AS src, f.language, i.module, i.name,"
-        " i.is_static FROM imports i JOIN files f ON f.id = i.file_id WHERE f.module != ''"
+        " i.is_static, i.is_type_only FROM imports i JOIN files f ON f.id = i.file_id"
+        " WHERE f.module != ''"
         " ORDER BY f.path, i.line"
     )
     for r in rows:
         if r["file_id"] not in kept:
+            continue
+        if r["is_type_only"]:
+            graph.type_only += 1
             continue
         dst = _target(r["language"], r["module"], r["name"], modules, type_module)
         if dst is None:
@@ -114,7 +123,9 @@ def _overview(graph: Graph, limit: int) -> str:
     head = [
         f"{len(graph.modules)} modules, {len(graph.edges)} internal import edges,"
         f" {len(cycles)} cycle{'s' if len(cycles) != 1 else ''} (edge weight = import"
-        f" statements; {graph.test_files} test files left out)"
+        f" statements; left out: {graph.test_files} test files"
+        + (f", {graph.type_only} TYPE_CHECKING imports" if graph.type_only else "")
+        + ")"
     ]
     importers: dict[str, set[str]] = defaultdict(set)
     for src, dst in graph.edges:

@@ -169,7 +169,10 @@ After each step, the loop names one import statement that creates that edge
 to remove. It says `cycle among 13 modules, e.g. ...` when the loop doesn't pass through
 every member.
 
-Test files are left out of the graph, and the header says how many were. Java tests
+Python imports inside `if TYPE_CHECKING:` are left out, because they never run. Counting
+them reports cycles that exist only for type checkers; flask's `flask.app <-> flask.cli`
+went through one. Test files are left out of the graph too, and the header says how many
+of each were left out. Java tests
 usually live in the same packages as the code they test, so their imports would show up
 as production dependencies. On apache/commons-lang they joined test-only packages into
 the main cycle.
@@ -181,10 +184,10 @@ the main cycle.
 
 ```
 module inventory.models (1 file)
-imports 2 internal: inventory.helpers 1, inventory.services 1
+imports 1 internal: inventory.helpers 1
 imported by 3: inventory.services 4, seed 2, inventory 1
 external 3: dataclasses 1, fastjson 1, typing 1
-cycle: inventory.models -> inventory.services (models.py:9) -> inventory.models (services.py:3)
+cycles: none
 ```
 
 Limits: Java classes used from the same package, or written fully qualified without an

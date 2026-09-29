@@ -11,20 +11,18 @@ from compass.tools.deps import (
 )
 
 
-def test_overview_lists_cycles_most_imported_and_top_edges(fx_conn):
+def test_overview_lists_most_imported_and_top_edges(fx_conn):
     lines = module_dependencies(fx_conn, None, 3).splitlines()
     assert lines == [
-        "11 modules, 9 internal import edges, 1 cycle"
-        " (edge weight = import statements; 0 test files left out)",
+        "11 modules, 8 internal import edges, 0 cycles (edge weight = import statements;"
+        " left out: 0 test files, 1 TYPE_CHECKING imports)",
         "most imported: inventory.models (by 3), inventory.helpers (by 2),"
-        " com.example.shop.model (by 1), com.example.shop.util (by 1), inventory.services (by 1)",
-        "cycle: inventory.models -> inventory.services (models.py:9) -> inventory.models"
-        " (services.py:3)",
+        " com.example.shop.model (by 1), com.example.shop.util (by 1), inventory.utils (by 1)",
         "top edges:",
         "  inventory.services -> inventory.models 4",
         "  com.example.shop.service -> com.example.shop.model 2",
         "  seed -> inventory.models 2",
-        "[truncated: 6 more edges] limit=9 shows all; or pass module=",
+        "[truncated: 5 more edges] limit=8 shows all; or pass module=",
     ]
 
 
@@ -39,15 +37,33 @@ def test_java_package_with_static_import_edge(fx_conn):
     ]
 
 
-def test_python_module_in_a_cycle(fx_conn):
+def test_type_checking_import_does_not_make_a_cycle(fx_conn):
+    # models.py:9 imports services under `if TYPE_CHECKING:`; services imports models for real.
     assert module_dependencies(fx_conn, "inventory.models", 10).splitlines() == [
         "module inventory.models (1 file)",
-        "imports 2 internal: inventory.helpers 1, inventory.services 1",
+        "imports 1 internal: inventory.helpers 1",
         "imported by 3: inventory.services 4, seed 2, inventory 1",
         "external 3: dataclasses 1, fastjson 1, typing 1",
-        "cycle: inventory.models -> inventory.services (models.py:9) -> inventory.models"
-        " (services.py:3)",
+        "cycles: none",
     ]
+
+
+def test_runtime_cycle_names_the_import_behind_each_step(tmp_path):
+    from compass.indexer.pipeline import index_repo
+    from compass.store.db import open_index
+
+    pkg = tmp_path / "repo" / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "a.py").write_text("import os\nfrom pkg import b\n")
+    (pkg / "b.py").write_text("from . import a\n")
+    index_repo(tmp_path / "repo", tmp_path / "i.db")
+    conn = open_index(tmp_path / "i.db")
+    try:
+        lines = module_dependencies(conn, "pkg.a", 10).splitlines()
+    finally:
+        conn.close()
+    assert lines[-1] == "cycle: pkg.a -> pkg.b (a.py:2) -> pkg.a (b.py:1)"
 
 
 def test_package_group_hides_edges_inside_the_group(fx_conn):
@@ -96,7 +112,7 @@ def test_test_files_are_left_out_of_the_graph(tmp_path):
         conn.close()
     assert text.splitlines()[0] == (
         "2 modules, 1 internal import edges, 0 cycles"
-        " (edge weight = import statements; 1 test files left out)"
+        " (edge weight = import statements; left out: 1 test files)"
     )
 
 
