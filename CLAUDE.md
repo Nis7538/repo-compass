@@ -17,7 +17,7 @@ The full plan is in PLAN.md. Follow it milestone by milestone.
 
 ## Stack
 - Python 3.12, `uv` for env and deps, `ruff` for lint/format, `pytest` for tests
-- `mcp` (official Python SDK, FastMCP) over stdio
+- `mcp` 2.x (official Python SDK, `MCPServer`, formerly FastMCP) over stdio
 - `tree-sitter` with Java and Python grammars
 - SQLite (stdlib, FTS5 for symbol search). No external services.
 - `typer` for CLI, `anthropic` SDK for the review agent and eval runner
