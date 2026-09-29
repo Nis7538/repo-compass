@@ -163,7 +163,14 @@ java/shop/src/main/java/com/example/shop/model/Order.java (java, 83 lines, modul
 
 The import graph between modules: Java packages and Python modules. Edge weight is the
 number of import statements. External modules are collapsed (`java.util`, `requests`).
-Cycles are strongly connected components, largest first, each shown as one concrete loop.
+Cycles are strongly connected components, largest first, each shown as one concrete loop
+(`cycle among 13 modules, e.g. a -> b -> a` when the loop doesn't pass through every
+member).
+
+Test files are left out of the graph, and the header says how many were. Java tests
+usually live in the same packages as the code they test, so their imports would show up
+as production dependencies. On apache/commons-lang they joined test-only packages into
+the main cycle.
 
 - No `module`: counts, the most imported modules, cycles, and the heaviest edges.
 - `module`: its internal imports, who imports it, its external dependencies, and the cycles
@@ -175,7 +182,7 @@ module inventory.models (1 file)
 imports 2 internal: inventory.helpers 1, inventory.services 1
 imported by 3: inventory.services 4, seed 2, inventory 1
 external 3: dataclasses 1, fastjson 1, typing 1
-cycle, 2 modules: inventory.models -> inventory.services -> inventory.models
+cycle: inventory.models -> inventory.services -> inventory.models
 ```
 
 Limits: Java classes used from the same package, or written fully qualified without an

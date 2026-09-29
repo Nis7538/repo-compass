@@ -12,8 +12,13 @@ statements, weighted by how many import statements make them:
 - Anything not in the index is external, collapsed to its first two segments for
   Java (java.util) and its first segment for Python (os, requests).
 
+Test files (tools/rank.is_test_path) are left out of the graph. In Java they
+usually share packages with the code they test, and their imports of fixtures
+and test-only packages would otherwise show up as production dependencies and
+cycles (on apache/commons-lang they joined 16 packages into one cycle).
+
 Cycles are strongly connected components with more than one module (Tarjan),
-largest first, each shown as one concrete loop.
+largest first, each shown as one concrete loop through the component.
 
 Limits: Java classes used from the same package, or written fully qualified
 without an import, create no edge. Python imports inside functions count the
@@ -26,6 +31,7 @@ from dataclasses import dataclass, field
 
 from compass.indexer.models import TYPE_KINDS
 from compass.tools.caps import CAPS, MAX_LIMIT
+from compass.tools.rank import is_test_path
 from compass.tools.render import clip, fit_lines, more_hint, truncated
 
 MAX_CYCLES = 3
@@ -38,28 +44,31 @@ class Graph:
     modules: dict[str, int]  # module -> file count
     edges: Counter = field(default_factory=Counter)  # (src, dst) -> import statements
     external: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
+    test_files: int = 0  # left out of the graph
 
 
 def build_graph(conn: sqlite3.Connection) -> Graph:
-    modules = dict(
-        conn.execute(
-            "SELECT module, count(*) FROM files WHERE module != '' GROUP BY module"
-        ).fetchall()
-    )
+    files = conn.execute("SELECT id, path, module FROM files WHERE module != ''").fetchall()
+    kept = {f["id"] for f in files if not is_test_path(f["path"])}
+    modules: Counter = Counter(f["module"] for f in files if f["id"] in kept)
     kinds = ",".join("?" * len(TYPE_KINDS))
-    type_module = dict(
-        conn.execute(
-            "SELECT s.qualified_name, f.module FROM symbols s JOIN files f ON f.id = s.file_id"
-            f" WHERE s.kind IN ({kinds})",
+    type_module = {
+        r["qualified_name"]: r["module"]
+        for r in conn.execute(
+            "SELECT s.qualified_name, s.file_id, f.module FROM symbols s"
+            f" JOIN files f ON f.id = s.file_id WHERE s.kind IN ({kinds})",
             sorted(TYPE_KINDS),
-        ).fetchall()
-    )
-    graph = Graph(modules)
+        )
+        if r["file_id"] in kept
+    }
+    graph = Graph(dict(modules), test_files=len(files) - len(kept))
     rows = conn.execute(
-        "SELECT f.module AS src, f.language, i.module, i.name, i.is_static"
+        "SELECT i.file_id, f.module AS src, f.language, i.module, i.name, i.is_static"
         " FROM imports i JOIN files f ON f.id = i.file_id WHERE f.module != ''"
     )
     for r in rows:
+        if r["file_id"] not in kept:
+            continue
         dst = _target(r["language"], r["module"], r["name"], modules, type_module)
         if dst is None:
             graph.external[r["src"]][_external_name(r["language"], r["module"])] += 1
@@ -96,7 +105,8 @@ def _overview(graph: Graph, limit: int) -> str:
     cycles = find_cycles(graph)
     head = [
         f"{len(graph.modules)} modules, {len(graph.edges)} internal import edges,"
-        f" {len(cycles)} cycle{'s' if len(cycles) != 1 else ''} (edge weight = import statements)"
+        f" {len(cycles)} cycle{'s' if len(cycles) != 1 else ''} (edge weight = import"
+        f" statements; {graph.test_files} test files left out)"
     ]
     importers: dict[str, set[str]] = defaultdict(set)
     for src, dst in graph.edges:
@@ -105,7 +115,7 @@ def _overview(graph: Graph, limit: int) -> str:
         top = sorted(importers.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:TOP_IMPORTED]
         head.append("most imported: " + ", ".join(f"{m} (by {len(s)})" for m, s in top))
     for cycle in cycles[:MAX_CYCLES]:
-        head.append(f"cycle, {len(cycle)} modules: " + _loop_text(graph, cycle))
+        head.append(_cycle_line(graph, cycle))
     if len(cycles) > MAX_CYCLES:
         head.append(truncated(len(cycles) - MAX_CYCLES, None, None, "cycles"))
     if not graph.edges:
@@ -127,7 +137,10 @@ def _one_module(graph: Graph, spec: str, limit: int) -> str:
         needle = spec.rstrip(".*").lower()
         similar = sorted(m for m in graph.modules if needle in m.lower())[:5]
         hint = f" Similar: {', '.join(similar)}." if similar else ""
-        return f'No module "{spec}" in the index.{hint} Call with no module for an overview.'
+        return (
+            f'No module "{spec}" in the import graph (test files are left out).{hint}'
+            " Call with no module for an overview."
+        )
 
     group = len(members) > 1
     files = sum(graph.modules[m] for m in members)
@@ -157,8 +170,7 @@ def _one_module(graph: Graph, spec: str, limit: int) -> str:
     if not cycles:
         head.append("cycles: none")
     for cycle in cycles[:MAX_CYCLES]:
-        start = min(cycle & members)
-        head.append(f"cycle, {len(cycle)} modules: " + _loop_text(graph, cycle, start))
+        head.append(_cycle_line(graph, cycle, min(cycle & members)))
     if len(cycles) > MAX_CYCLES:
         head.append(truncated(len(cycles) - MAX_CYCLES, None, None, "cycles"))
     lines, _ = fit_lines(head, [], CAPS["module_dependencies"])
@@ -227,6 +239,15 @@ def find_cycles(graph: Graph) -> list[set[str]]:
                 parent = work[-1][0]
                 low[parent] = min(low[parent], low[node])
     return sorted(components, key=lambda c: (-len(c), min(c)))
+
+
+def _cycle_line(graph: Graph, cycle: set[str], start: str | None = None) -> str:
+    """'cycle: a -> b -> a', or 'cycle among 16 modules, e.g. a -> b -> a' when the loop
+    shown does not pass through every module of the component."""
+    loop = _loop_text(graph, cycle, start)
+    if loop.count(" -> ") == len(cycle):
+        return f"cycle: {loop}"
+    return f"cycle among {len(cycle)} modules, e.g. {loop}"
 
 
 def _successors(graph: Graph) -> dict[str, list[str]]:

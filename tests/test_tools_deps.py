@@ -2,16 +2,23 @@
 
 from collections import Counter
 
-from compass.tools.deps import Graph, _loop_text, find_cycles, module_dependencies
+from compass.tools.deps import (
+    Graph,
+    _cycle_line,
+    _loop_text,
+    find_cycles,
+    module_dependencies,
+)
 
 
 def test_overview_lists_cycles_most_imported_and_top_edges(fx_conn):
     lines = module_dependencies(fx_conn, None, 3).splitlines()
     assert lines == [
-        "11 modules, 9 internal import edges, 1 cycle (edge weight = import statements)",
+        "11 modules, 9 internal import edges, 1 cycle"
+        " (edge weight = import statements; 0 test files left out)",
         "most imported: inventory.models (by 3), inventory.helpers (by 2),"
         " com.example.shop.model (by 1), com.example.shop.util (by 1), inventory.services (by 1)",
-        "cycle, 2 modules: inventory.models -> inventory.services -> inventory.models",
+        "cycle: inventory.models -> inventory.services -> inventory.models",
         "top edges:",
         "  inventory.services -> inventory.models 4",
         "  com.example.shop.service -> com.example.shop.model 2",
@@ -37,7 +44,7 @@ def test_python_module_in_a_cycle(fx_conn):
         "imports 2 internal: inventory.helpers 1, inventory.services 1",
         "imported by 3: inventory.services 4, seed 2, inventory 1",
         "external 3: dataclasses 1, fastjson 1, typing 1",
-        "cycle, 2 modules: inventory.models -> inventory.services -> inventory.models",
+        "cycle: inventory.models -> inventory.services -> inventory.models",
     ]
 
 
@@ -61,9 +68,40 @@ def test_inline_lists_are_truncated_with_marker(fx_conn):
 
 def test_unknown_module_suggests_similar(fx_conn):
     assert module_dependencies(fx_conn, "util", 10) == (
-        'No module "util" in the index. Similar: com.example.shop.util, inventory.utils.'
-        " Call with no module for an overview."
+        'No module "util" in the import graph (test files are left out). Similar:'
+        " com.example.shop.util, inventory.utils. Call with no module for an overview."
     )
+
+
+def test_test_files_are_left_out_of_the_graph(tmp_path):
+    from compass.indexer.pipeline import index_repo
+    from compass.store.db import open_index
+
+    files = {
+        "src/main/java/a/A.java": "package a;\nimport b.B;\npublic class A { B b; }\n",
+        "src/main/java/b/B.java": "package b;\npublic class B {}\n",
+        # Same package as B, as Java tests usually are; with it, a and b would form a cycle.
+        "src/test/java/b/BTest.java": "package b;\nimport a.A;\nclass BTest { A a; }\n",
+    }
+    for path, text in files.items():
+        (tmp_path / "repo" / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "repo" / path).write_text(text)
+    index_repo(tmp_path / "repo", tmp_path / "i.db")
+    conn = open_index(tmp_path / "i.db")
+    try:
+        text = module_dependencies(conn, None, 10)
+    finally:
+        conn.close()
+    assert text.splitlines()[0] == (
+        "2 modules, 1 internal import edges, 0 cycles"
+        " (edge weight = import statements; 1 test files left out)"
+    )
+
+
+def test_cycle_line_says_when_the_loop_is_one_example():
+    graph = _graph(("a", "b"), ("b", "a"), ("b", "c"), ("c", "b"))
+    assert _cycle_line(graph, {"a", "b", "c"}) == "cycle among 3 modules, e.g. a -> b -> a"
+    assert _cycle_line(_graph(("a", "b"), ("b", "a")), {"a", "b"}) == "cycle: a -> b -> a"
 
 
 def _graph(*edges):
