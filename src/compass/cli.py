@@ -97,6 +97,19 @@ def symbol(
         conn.close()
 
 
+@app.command()
+def serve(
+    repo: Path = typer.Option(Path("."), "--repo", help="Repository to serve."),
+    db: Path | None = DB_OPTION,
+) -> None:
+    """Run the MCP server over stdio for one repository (indexes it in the background)."""
+    if not repo.is_dir():
+        raise typer.BadParameter(f"not a directory: {repo}")
+    from compass.server import build_server  # the MCP SDK is only needed here
+
+    build_server(repo, db).run("stdio")
+
+
 def format_symbol(sym: SymbolRow) -> str:
     return f"{sym.kind} {sym.qualified_name}  {sym.signature}  {sym.path}:{sym.start_line}"
 
@@ -105,3 +118,7 @@ def format_reference(reference: Reference) -> str:
     ref = reference.ref
     call = f"{ref.receiver}.{ref.name}" if ref.receiver else ref.name
     return f"{reference.confidence:<8} {ref.path}:{ref.line}:{ref.col}  {call}(...)"
+
+
+if __name__ == "__main__":
+    app()
