@@ -186,6 +186,12 @@ def test_splat_arguments_make_arg_count_unknown():
         ("src/inventory/sub/deep.py", "inventory.sub.deep"),
         ("scripts/seed.py", "seed"),
         ("setup.py", "setup"),
+        # A directory without __init__.py inside a package is a namespace portion of it
+        # (flask's src/flask/sansio/), importable as inventory.sansio.app.
+        ("src/inventory/sansio/app.py", "inventory.sansio.app"),
+        ("src/inventory/sansio/more/x.py", "inventory.sansio.more.x"),
+        # Top-level namespace packages stay unrecognized: nothing marks the source root.
+        ("src/nsonly/mod.py", "mod"),
     ],
 )
 def test_module_name(path, expected):
