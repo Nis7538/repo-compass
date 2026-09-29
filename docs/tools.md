@@ -166,7 +166,9 @@ number of import statements. External modules are collapsed (`java.util`, `reque
 Cycles are strongly connected components, largest first, each shown as one concrete loop.
 After each step, the loop names one import statement that creates that edge
 (`a -> b (A.java:12) -> a (B.java:40)`), since the next question is usually which import
-to remove. It says `cycle among 13 modules, e.g. ...` when the loop doesn't pass through
+to remove. A top-level import is preferred as the example. If every import making a step
+is inside a Python function, the step says `(cli.py:45, inside a function)`, because such
+an import runs only when the function is called, and the cycle cannot fail at import time. It says `cycle among 13 modules, e.g. ...` when the loop doesn't pass through
 every member.
 
 Python imports inside `if TYPE_CHECKING:` are left out, because they never run. Counting

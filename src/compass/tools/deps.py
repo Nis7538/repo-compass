@@ -24,7 +24,9 @@ cycles (on apache/commons-lang they joined 16 packages into one cycle).
 Cycles are strongly connected components with more than one module (Tarjan),
 largest first, each shown as one concrete loop through the component. Each step
 of the loop names one import statement that creates it (file:line), because the
-next question is always "which import do I remove?".
+next question is always "which import do I remove?". A top-level import is
+preferred; if every import making that step is inside a Python function, the step
+says so, because such a cycle does not fail at import time.
 
 Limits: Java classes used from the same package, or written fully qualified
 without an import, create no edge. Python imports inside functions count the
@@ -41,6 +43,7 @@ from compass.tools.rank import is_test_path
 from compass.tools.render import clip, fit_lines, more_hint, truncated
 
 MAX_CYCLES = 3
+DEFERRED = ", inside a function"
 CYCLE_WIDTH = 300
 TOP_IMPORTED = 5
 
@@ -52,7 +55,8 @@ class Graph:
     external: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
     test_files: int = 0  # left out of the graph
     type_only: int = 0  # Python imports under `if TYPE_CHECKING:`, left out
-    # (src, dst) -> the first import statement making that edge, as 'File.java:12'
+    # (src, dst) -> one import statement making that edge: 'File.java:12', or
+    # 'cli.py:45, inside a function' when every import making it is deferred
     example: dict[tuple[str, str], str] = field(default_factory=dict)
 
 
@@ -71,6 +75,7 @@ def build_graph(conn: sqlite3.Connection) -> Graph:
         if r["file_id"] in kept
     }
     graph = Graph(dict(modules), test_files=len(files) - len(kept))
+    deferred_at = _function_ranges(conn)
     rows = conn.execute(
         "SELECT i.file_id, i.line, f.path, f.module AS src, f.language, i.module, i.name,"
         " i.is_static, i.is_type_only FROM imports i JOIN files f ON f.id = i.file_id"
@@ -87,11 +92,32 @@ def build_graph(conn: sqlite3.Connection) -> Graph:
         if dst is None:
             graph.external[r["src"]][_external_name(r["language"], r["module"])] += 1
         elif dst != r["src"]:
-            graph.edges[(r["src"], dst)] += 1
-            graph.example.setdefault(
-                (r["src"], dst), f"{r['path'].rsplit('/', 1)[-1]}:{r['line']}"
-            )
+            edge = (r["src"], dst)
+            graph.edges[edge] += 1
+            where = f"{r['path'].rsplit('/', 1)[-1]}:{r['line']}"
+            if _inside(deferred_at.get(r["file_id"], []), r["line"]):
+                graph.example.setdefault(edge, where + DEFERRED)
+            elif graph.example.get(edge, DEFERRED).endswith(DEFERRED):
+                graph.example[edge] = where  # a top-level import is the better example
     return graph
+
+
+def _function_ranges(conn: sqlite3.Connection) -> dict[int, list[tuple[int, int]]]:
+    """Python function and method line ranges per file. An import inside one is deferred:
+    it runs when the function is called, not when the module is imported."""
+    ranges: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    rows = conn.execute(
+        "SELECT s.file_id, s.start_line, s.end_line FROM symbols s JOIN files f"
+        " ON f.id = s.file_id WHERE f.language = 'python' AND s.kind IN ('function', 'method')"
+    )
+    for r in rows:
+        ranges[r["file_id"]].append((r["start_line"], r["end_line"]))
+    return ranges
+
+
+def _inside(ranges: list[tuple[int, int]], line: int) -> bool:
+    # start_line is the def (or decorator) line, so an import on it cannot be inside.
+    return any(start < line <= end for start, end in ranges)
 
 
 def _target(language, module, name, modules, type_module) -> str | None:

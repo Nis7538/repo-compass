@@ -66,6 +66,43 @@ def test_runtime_cycle_names_the_import_behind_each_step(tmp_path):
     assert lines[-1] == "cycle: pkg.a -> pkg.b (a.py:2) -> pkg.a (b.py:1)"
 
 
+def test_cycle_step_made_only_by_function_imports_is_marked(tmp_path):
+    from compass.indexer.pipeline import index_repo
+    from compass.store.db import open_index
+
+    pkg = tmp_path / "repo" / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "a.py").write_text("from pkg import b\n")
+    # b imports a twice, both inside functions: the step is marked as deferred.
+    (pkg / "b.py").write_text("def f():\n    from pkg import a\n\ndef g():\n    import pkg.a\n")
+    index_repo(tmp_path / "repo", tmp_path / "i.db")
+    conn = open_index(tmp_path / "i.db")
+    try:
+        lines = module_dependencies(conn, "pkg.a", 10).splitlines()
+    finally:
+        conn.close()
+    assert lines[-1] == "cycle: pkg.a -> pkg.b (a.py:1) -> pkg.a (b.py:2, inside a function)"
+
+
+def test_top_level_import_is_preferred_as_the_example(tmp_path):
+    from compass.indexer.pipeline import index_repo
+    from compass.store.db import open_index
+
+    pkg = tmp_path / "repo" / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "a.py").write_text("from pkg import b\n")
+    (pkg / "b.py").write_text("def f():\n    from pkg import a\n\nfrom pkg import a\n")
+    index_repo(tmp_path / "repo", tmp_path / "i.db")
+    conn = open_index(tmp_path / "i.db")
+    try:
+        lines = module_dependencies(conn, "pkg.a", 10).splitlines()
+    finally:
+        conn.close()
+    assert lines[-1] == "cycle: pkg.a -> pkg.b (a.py:1) -> pkg.a (b.py:4)"
+
+
 def test_package_group_hides_edges_inside_the_group(fx_conn):
     lines = module_dependencies(fx_conn, "inventory.*", 10).splitlines()
     assert lines[:3] == [
