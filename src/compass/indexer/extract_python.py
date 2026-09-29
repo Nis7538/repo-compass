@@ -50,6 +50,17 @@ def module_name(rel_path: str, package_dirs: set[str]) -> str:
     return ".".join(parts)
 
 
+def _is_type_checking(condition: Node | None) -> bool:
+    """`TYPE_CHECKING`, `typing.TYPE_CHECKING`, `t.TYPE_CHECKING` (and nothing else)."""
+    if condition is None:
+        return False
+    if condition.type == "identifier":
+        return text(condition) == "TYPE_CHECKING"
+    if condition.type == "attribute":
+        return text(condition.child_by_field_name("attribute")) == "TYPE_CHECKING"
+    return False
+
+
 def _in_package(directory: PurePosixPath, package_dirs: set[str]) -> bool:
     """A regular package, or a directory somewhere below one (a namespace portion)."""
     while directory.name:
@@ -71,6 +82,11 @@ class _Walker:
         self.out = out
         # Package that relative imports are resolved against.
         self.package = out.module if is_package else out.module.rpartition(".")[0]
+        # Byte ranges of `if TYPE_CHECKING:` bodies: imports there never run.
+        self.type_only: list[tuple[int, int]] = []
+
+    def _is_type_only(self, node: Node) -> bool:
+        return any(start <= node.start_byte < end for start, end in self.type_only)
 
     def run(self, root: Node) -> None:
         # Entries: (node, enclosing symbol index, decorator nodes for a definition)
@@ -94,6 +110,11 @@ class _Walker:
                 continue
             if kind == "call":
                 self._call(node, scope)
+            elif kind == "if_statement" and _is_type_checking(
+                node.child_by_field_name("condition")
+            ):
+                body = node.child_by_field_name("consequence")
+                self.type_only.append((body.start_byte, body.end_byte))
             elif kind == "import_statement":
                 self._import(node)
             elif kind == "import_from_statement":
@@ -203,12 +224,15 @@ class _Walker:
                 alias = text(child.child_by_field_name("alias"))
             else:
                 module, alias = text(child), None
-            self.out.imports.append(Import(module, None, alias, line(node)))
+            self.out.imports.append(
+                Import(module, None, alias, line(node), type_only=self._is_type_only(node))
+            )
 
     def _import_from(self, node: Node) -> None:
         module = self._resolve_module(node.child_by_field_name("module_name"))
+        type_only = self._is_type_only(node)
         if any(c.type == "wildcard_import" for c in node.named_children):
-            self.out.imports.append(Import(module, "*", None, line(node)))
+            self.out.imports.append(Import(module, "*", None, line(node), type_only=type_only))
             return
         for child in node.children_by_field_name("name"):
             if child.type == "aliased_import":
@@ -216,7 +240,7 @@ class _Walker:
                 alias = text(child.child_by_field_name("alias"))
             else:
                 name, alias = text(child), None
-            self.out.imports.append(Import(module, name, alias, line(node)))
+            self.out.imports.append(Import(module, name, alias, line(node), type_only=type_only))
 
     def _resolve_module(self, node: Node) -> str:
         """'..x' in package 'a.b.c' -> 'a.b.x'. Left relative if it climbs past the top."""

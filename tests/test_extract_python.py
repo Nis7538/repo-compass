@@ -178,6 +178,33 @@ def test_splat_arguments_make_arg_count_unknown():
     assert [r.arg_count for r in out.refs] == [None, 2]
 
 
+def test_imports_under_type_checking_are_type_only():
+    source = (
+        b"import typing as t\n"
+        b"from typing import TYPE_CHECKING\n"
+        b"if TYPE_CHECKING:\n"
+        b"    from a import A\n"
+        b"elif x:\n"
+        b"    import b\n"
+        b"else:\n"
+        b"    import c\n"
+        b"if t.TYPE_CHECKING:\n"
+        b"    import d\n"
+        b"if not TYPE_CHECKING:\n"
+        b"    import e\n"
+    )
+    out = extract_python(source, "m")
+    assert [(i.module, i.type_only) for i in out.imports] == [
+        ("typing", False),
+        ("typing", False),
+        ("a", True),
+        ("b", False),
+        ("c", False),
+        ("d", True),
+        ("e", False),
+    ]
+
+
 @pytest.mark.parametrize(
     ("path", "expected"),
     [
