@@ -145,7 +145,8 @@ def _symbol_at(conn: sqlite3.Connection, path: str, line: int) -> SymbolTarget:
     if not containing:
         return SymbolTarget(
             None,
-            f"No symbol spans {found.file.path}:{line}. file_outline lists what the file defines.",
+            f"{found.file.path}:{line} is outside every symbol (module level: imports,"
+            " constants). Read the file to see that line; file_outline lists what it defines.",
         )
     # Innermost: the latest start, then the shortest range.
     best = max(containing, key=lambda s: (s.start_line, s.start_line - s.end_line))
