@@ -28,6 +28,10 @@ The full plan is in PLAN.md. Follow it milestone by milestone.
 - `uv run pytest -q` — tests
 - `uv run ruff check . && uv run ruff format --check .` — lint
 - `uv run compass --help` — CLI
+- `uv run compass index <path>` — index a repo (incremental; DB in user cache dir, `--db` to override)
+- `uv run compass symbol <name> --repo <path> [--refs]` — look up symbols and their call sites
+- `uv run pytest -q -m "not slow"` — tests without the 50k-line benchmark
+- `uv run python scripts/bench_index.py <path> | --synthetic 50000` — indexing benchmark
 
 ## Guardrails
 - Tool outputs returned to agents must be size-capped and truncated with an explicit "truncated, N more" marker. Token efficiency is a core feature.
