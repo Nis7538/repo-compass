@@ -178,6 +178,33 @@ def test_splat_arguments_make_arg_count_unknown():
     assert [r.arg_count for r in out.refs] == [None, 2]
 
 
+def test_imports_under_type_checking_are_type_only():
+    source = (
+        b"import typing as t\n"
+        b"from typing import TYPE_CHECKING\n"
+        b"if TYPE_CHECKING:\n"
+        b"    from a import A\n"
+        b"elif x:\n"
+        b"    import b\n"
+        b"else:\n"
+        b"    import c\n"
+        b"if t.TYPE_CHECKING:\n"
+        b"    import d\n"
+        b"if not TYPE_CHECKING:\n"
+        b"    import e\n"
+    )
+    out = extract_python(source, "m")
+    assert [(i.module, i.type_only) for i in out.imports] == [
+        ("typing", False),
+        ("typing", False),
+        ("a", True),
+        ("b", False),
+        ("c", False),
+        ("d", True),
+        ("e", False),
+    ]
+
+
 @pytest.mark.parametrize(
     ("path", "expected"),
     [
@@ -186,6 +213,12 @@ def test_splat_arguments_make_arg_count_unknown():
         ("src/inventory/sub/deep.py", "inventory.sub.deep"),
         ("scripts/seed.py", "seed"),
         ("setup.py", "setup"),
+        # A directory without __init__.py inside a package is a namespace portion of it
+        # (flask's src/flask/sansio/), importable as inventory.sansio.app.
+        ("src/inventory/sansio/app.py", "inventory.sansio.app"),
+        ("src/inventory/sansio/more/x.py", "inventory.sansio.more.x"),
+        # Top-level namespace packages stay unrecognized: nothing marks the source root.
+        ("src/nsonly/mod.py", "mod"),
     ],
 )
 def test_module_name(path, expected):

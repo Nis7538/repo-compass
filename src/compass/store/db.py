@@ -161,9 +161,12 @@ def write_file(conn: sqlite3.Connection, record: FileRecord, extract: FileExtrac
         symbol_ids.append(cur.lastrowid)
 
     conn.executemany(
-        "INSERT INTO imports(file_id, module, name, alias, is_static, line)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
-        [(file_id, i.module, i.name, i.alias, int(i.is_static), i.line) for i in extract.imports],
+        "INSERT INTO imports(file_id, module, name, alias, is_static, is_type_only, line)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+            (file_id, i.module, i.name, i.alias, int(i.is_static), int(i.type_only), i.line)
+            for i in extract.imports
+        ],
     )
     conn.executemany(
         "INSERT INTO refs(file_id, enclosing_symbol_id, kind, name, receiver, arg_count,"

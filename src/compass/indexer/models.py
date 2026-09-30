@@ -33,6 +33,7 @@ class Import:
     alias: str | None
     line: int
     is_static: bool = False
+    type_only: bool = False  # Python: inside `if TYPE_CHECKING:`, never imported at runtime
 
 
 @dataclass

@@ -705,7 +705,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.52" },
-    { name = "mcp", specifier = ">=1.9" },
+    { name = "mcp", specifier = ">=2.2,<3" },
     { name = "tree-sitter", specifier = ">=0.24" },
     { name = "tree-sitter-java", specifier = ">=0.23" },
     { name = "tree-sitter-python", specifier = ">=0.23" },

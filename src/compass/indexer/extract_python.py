@@ -33,17 +33,41 @@ def module_name(rel_path: str, package_dirs: set[str]) -> str:
     Walks up from the file while the directory is a package (has __init__.py),
     so `src/inventory/models.py` becomes `inventory.models` when `src/` is not a
     package. package_dirs holds repo-relative directory paths ('.' for the root).
-    Namespace packages (PEP 420, no __init__.py) are not recognized.
+
+    Namespace packages (PEP 420, no __init__.py) are recognized only below a regular
+    package: `src/flask/sansio/app.py` is `flask.sansio.app` because `flask` is a
+    package. A namespace package at the top has nothing marking where its source
+    root is, so `src/nsonly/mod.py` stays `mod`.
     """
     path = PurePosixPath(rel_path)
     parts = [] if path.name == "__init__.py" else [path.stem]
     directory = path.parent
-    while directory.name and str(directory) in package_dirs:
+    while directory.name and _in_package(directory, package_dirs):
         parts.insert(0, directory.name)
         directory = directory.parent
     if not parts:  # an __init__.py whose directory is the repo root
         parts = [path.parent.name or path.stem]
     return ".".join(parts)
+
+
+def _is_type_checking(condition: Node | None) -> bool:
+    """`TYPE_CHECKING`, `typing.TYPE_CHECKING`, `t.TYPE_CHECKING` (and nothing else)."""
+    if condition is None:
+        return False
+    if condition.type == "identifier":
+        return text(condition) == "TYPE_CHECKING"
+    if condition.type == "attribute":
+        return text(condition.child_by_field_name("attribute")) == "TYPE_CHECKING"
+    return False
+
+
+def _in_package(directory: PurePosixPath, package_dirs: set[str]) -> bool:
+    """A regular package, or a directory somewhere below one (a namespace portion)."""
+    while directory.name:
+        if str(directory) in package_dirs:
+            return True
+        directory = directory.parent
+    return False
 
 
 def extract_python(source: bytes, module: str, is_package: bool = False) -> FileExtract:
@@ -58,6 +82,11 @@ class _Walker:
         self.out = out
         # Package that relative imports are resolved against.
         self.package = out.module if is_package else out.module.rpartition(".")[0]
+        # Byte ranges of `if TYPE_CHECKING:` bodies: imports there never run.
+        self.type_only: list[tuple[int, int]] = []
+
+    def _is_type_only(self, node: Node) -> bool:
+        return any(start <= node.start_byte < end for start, end in self.type_only)
 
     def run(self, root: Node) -> None:
         # Entries: (node, enclosing symbol index, decorator nodes for a definition)
@@ -81,6 +110,11 @@ class _Walker:
                 continue
             if kind == "call":
                 self._call(node, scope)
+            elif kind == "if_statement" and _is_type_checking(
+                node.child_by_field_name("condition")
+            ):
+                body = node.child_by_field_name("consequence")
+                self.type_only.append((body.start_byte, body.end_byte))
             elif kind == "import_statement":
                 self._import(node)
             elif kind == "import_from_statement":
@@ -190,12 +224,15 @@ class _Walker:
                 alias = text(child.child_by_field_name("alias"))
             else:
                 module, alias = text(child), None
-            self.out.imports.append(Import(module, None, alias, line(node)))
+            self.out.imports.append(
+                Import(module, None, alias, line(node), type_only=self._is_type_only(node))
+            )
 
     def _import_from(self, node: Node) -> None:
         module = self._resolve_module(node.child_by_field_name("module_name"))
+        type_only = self._is_type_only(node)
         if any(c.type == "wildcard_import" for c in node.named_children):
-            self.out.imports.append(Import(module, "*", None, line(node)))
+            self.out.imports.append(Import(module, "*", None, line(node), type_only=type_only))
             return
         for child in node.children_by_field_name("name"):
             if child.type == "aliased_import":
@@ -203,7 +240,7 @@ class _Walker:
                 alias = text(child.child_by_field_name("alias"))
             else:
                 name, alias = text(child), None
-            self.out.imports.append(Import(module, name, alias, line(node)))
+            self.out.imports.append(Import(module, name, alias, line(node), type_only=type_only))
 
     def _resolve_module(self, node: Node) -> str:
         """'..x' in package 'a.b.c' -> 'a.b.x'. Left relative if it climbs past the top."""

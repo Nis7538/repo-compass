@@ -17,7 +17,7 @@ The full plan is in PLAN.md. Follow it milestone by milestone.
 
 ## Stack
 - Python 3.12, `uv` for env and deps, `ruff` for lint/format, `pytest` for tests
-- `mcp` (official Python SDK, FastMCP) over stdio
+- `mcp` 2.x (official Python SDK, `MCPServer`, formerly FastMCP) over stdio
 - `tree-sitter` with Java and Python grammars
 - SQLite (stdlib, FTS5 for symbol search). No external services.
 - `typer` for CLI, `anthropic` SDK for the review agent and eval runner
@@ -30,10 +30,13 @@ The full plan is in PLAN.md. Follow it milestone by milestone.
 - `uv run compass --help` — CLI
 - `uv run compass index <path>` — index a repo (incremental; DB in user cache dir, `--db` to override)
 - `uv run compass symbol <name> --repo <path> [--refs]` — look up symbols and their call sites
-- `uv run pytest -q -m "not slow"` — tests without the 50k-line benchmark
+- `uv run compass serve --repo <path> [--db <file>]` — MCP server over stdio (indexes in the background)
+- `claude mcp add repo-compass -- uv run --project <compass checkout> compass serve --repo .` — register with Claude Code
+- `uv run pytest -q -m "not slow"` — tests without the 50k-line benchmark and the stdio subprocess test
 - `uv run python scripts/bench_index.py <path> | --synthetic 50000` — indexing benchmark
 
 ## Guardrails
 - Tool outputs returned to agents must be size-capped and truncated with an explicit "truncated, N more" marker. Token efficiency is a core feature.
 - Read-only: this tool never modifies the target repository.
 - No proprietary or employer-related code, names, or data anywhere in this repo. Test fixtures are either written from scratch or come from permissively licensed OSS with attribution.
+- Each tool has a documented token cap enforced by a test. Never add default-on bodies or long context lines to tool output.
