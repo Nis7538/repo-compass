@@ -72,6 +72,11 @@ async def test_lists_six_read_only_text_tools_within_budget(client):
 async def test_each_tool_returns_its_pure_function_output(client, tmp_path):
     cases = [
         ("search_symbols", {"query": "save"}, lambda c: search_symbols(c, "save", None, 10)),
+        (
+            "search_symbols",
+            {"query": "", "kind": "class", "path": "model/"},
+            lambda c: search_symbols(c, "", "class", 10, "model/"),
+        ),
         ("get_symbol", {"symbol": "Order.addAll"}, lambda c: get_symbol(c, "Order.addAll", 60)),
         (
             "find_references",

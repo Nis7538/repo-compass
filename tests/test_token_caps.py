@@ -52,6 +52,7 @@ CALLS = [
     ("repo_summary", {}, True),
     ("search_symbols", {"query": "number"}, True),
     ("search_symbols", {"query": "process"}, False),
+    ("search_symbols", {"query": "", "path": "org/example"}, True),
     ("get_symbol", {"symbol": "Big.huge"}, True),
     ("get_symbol", {"symbol": "org.example.deeply.nested.core.Big"}, True),
     ("find_references", {"symbol": "Hub.process"}, True),

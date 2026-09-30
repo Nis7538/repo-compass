@@ -60,7 +60,7 @@ source roots (package dir = root + package path): java/shop/src/main/java/, pyth
   (no package)  python/scripts/  1 file 6 lines
 ```
 
-## search_symbols(query, kind=None, limit=10)
+## search_symbols(query, kind=None, path=None, limit=10)
 
 `query` is a simple name (`save`), a dotted name (`Order.add`) or words (`get user` finds
 `get_user_by_id`). `kind` is one of class, interface, enum, record, annotation, method,
@@ -82,6 +82,32 @@ services.py
   27 method StockService.save  def save(self)
 utils.py
   4 function save  def save(obj)
+```
+
+`path` limits the search to part of the repo, matched on whole segments:
+- with a `/` or a `.java`/`.py` ending, it is a directory or file anywhere in the tree:
+  `lang3/builder`, `model/Order.java`, `inventory/models` (finds `inventory/models.py`).
+  A trailing `/` forces this reading (`scripts/`).
+- otherwise it is a package or module name, or a dotted piece of one: `builder` finds
+  `org.apache.commons.lang3.builder` and its subpackages; `com.x.model`, `inventory.models`.
+
+With `path` and an empty `query`, the tool lists what that part of the repo defines. It uses
+the exact-tier ranking (production first, types, then callables, then fields), so
+`search_symbols("", kind="class", path="builder")` answers "what are the main classes of
+this package" without reading any file. The header counts every kind, so a cut list still
+shows the whole:
+
+```
+39 symbols under model (5 files): class 3, interface 1, enum 2, record 1, annotation 1, method 12, constructor 5, field 14
+paths under java/shop/src/main/java/com/example/shop/model/
+Audited.java
+  6 annotation Audited  public @interface Audited
+Item.java
+  3 record Item  public record Item(String sku, double price)
+Order.java
+  9 class Order  public class Order implements Priced
+  62 class Order.Line  public static class Line
+[truncated: 35 more (fields 14, methods 12, constructors 5, enums 2, classes 1, interfaces 1)] limit=39 shows all
 ```
 
 ## get_symbol(symbol, max_lines=60)

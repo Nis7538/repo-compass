@@ -63,8 +63,9 @@ and it said so). Answers were checked against the source with grep:
   method name that is a reasonable choice. We did not tune the tool descriptions to steer it
   toward compass; that would bias M5. M5 compares the two conditions on the same tasks.
 - **No way to list a package's classes.** In run 2, "main classes of `builder`" came partly
-  from the model's own knowledge. `search_symbols` has no path or package filter. That is a
-  candidate for M3+ if the evals show the need.
+  from the model's own knowledge. `search_symbols` has no path or package filter.
+  *Addressed at the start of M3*: `search_symbols(query="", kind="class", path="builder")`
+  lists a package's classes. It has not been re-run end to end yet.
 - **Inheritance more than one hop away is not resolved** (ADR-003). 44 of flask's
   `@app.route` call sites stay `possible`, because `Flask → App → Scaffold` is two hops and
   those files import only `Flask`.

@@ -102,11 +102,15 @@ def build_server(
         "Find symbols by name: 'save', 'Order.add', or words ('get user' finds"
         " get_user_by_id). Returns file:line, kind, signature; no bodies. Ranked exact name,"
         " then word match; non-test first. kind: class|interface|enum|record|annotation|"
-        f"method|constructor|function|field. <= {CAPS['search_symbols']} tokens."
+        "method|constructor|function|field. path: only in this dir, file or package"
+        " ('model/', 'com.x.model'); with query '' it lists what path defines, types first."
+        f" <= {CAPS['search_symbols']} tokens."
     )
-    def search_symbols(query: str, kind: str | None = None, limit: int = DEFAULT_LIMIT) -> str:
+    def search_symbols(
+        query: str, kind: str | None = None, path: str | None = None, limit: int = DEFAULT_LIMIT
+    ) -> str:
         n, note = bounded("limit", limit)
-        return run("search_symbols", lambda conn, _: search_tool(conn, query, kind, n), note)
+        return run("search_symbols", lambda conn, _: search_tool(conn, query, kind, n, path), note)
 
     @tool(
         "Source of one symbol: body for methods/functions, member list for types, plus doc."

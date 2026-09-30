@@ -9,20 +9,46 @@ search ranking, best first:
   2. word matches from the full-text index (bm25; 'getUser' finds get_user_by_id).
 Within the exact tier: production code before tests, types before members,
 then location. Within the word tier: bm25 order, tests moved after non-tests.
+
+`path` limits the search to a directory, file or package (store.queries.Scope).
+With an empty query it lists what that scope defines, ranked like the exact
+tier: production before tests, types, then callables, then fields. That answers
+"what are the main classes of package X" without reading its files.
 """
 
+import difflib
+import re
 import sqlite3
 import textwrap
+from collections import Counter
 from pathlib import Path
 
 from compass.indexer.models import TYPE_KINDS
 from compass.store.db import get_meta
-from compass.store.queries import SymbolRow, exact_symbols, file_symbols, fts_symbols, get_file
+from compass.store.queries import (
+    SOURCE_SUFFIXES,
+    FileRow,
+    Scope,
+    SymbolRow,
+    exact_symbols,
+    file_symbols,
+    fts_symbols,
+    get_file,
+    scope_files,
+    scope_of,
+    scope_symbols,
+)
 from compass.tools.caps import CAPS, MAX_LIMIT
 from compass.tools.outline import member_outline
-from compass.tools.rank import is_test_path, short_name, symbol_line, symbol_rank_key
+from compass.tools.rank import (
+    is_test_path,
+    kind_plural,
+    short_name,
+    symbol_line,
+    symbol_rank_key,
+)
 from compass.tools.render import Entry, clip, fit_grouped, fit_lines, more_hint, truncated
-from compass.tools.target import resolve_symbol
+from compass.tools.target import normalize_path, resolve_symbol
 
 KINDS = (
     "class",
@@ -40,22 +66,33 @@ BODY_LINE_WIDTH = 200
 DOC_WIDTH = 300
 
 
-def search_symbols(conn: sqlite3.Connection, query: str, kind: str | None, limit: int) -> str:
+def search_symbols(
+    conn: sqlite3.Connection, query: str, kind: str | None, limit: int, path: str | None = None
+) -> str:
     query = query.strip()
-    if not query:
-        return (
-            "Empty query. Pass a name ('add'), a dotted name ('Order.add') or words ('get user')."
-        )
     if kind is not None and kind not in KINDS:
         return f'Unknown kind "{kind}". Use one of: {", ".join(KINDS)}.'
+    scope = None
+    if path is not None and path.strip():
+        scope = _scope(conn, path)
+        files = scope_files(conn, scope)
+        if not files:
+            return _no_such_scope(conn, scope)
+        if not query:
+            return _list_scope(conn, scope, files, kind, limit)
+    if not query:
+        return (
+            "Empty query. Pass a name ('add'), a dotted name ('Order.add') or words"
+            " ('get user'); or a path ('model/') and no query to list what it defines."
+        )
 
-    exact = sorted(exact_symbols(conn, query, kind), key=symbol_rank_key)
+    exact = sorted(exact_symbols(conn, query, kind, scope), key=symbol_rank_key)
     seen = {s.id for s in exact}
-    fts = fts_symbols(conn, query, kind, FTS_LIMIT)
+    fts = fts_symbols(conn, query, kind, FTS_LIMIT, scope)
     words = [s for s in fts if s.id not in seen]
     words.sort(key=lambda s: is_test_path(s.path))  # stable: keeps bm25 order otherwise
     ranked = exact + words
-    about = f" kind={kind}" if kind else ""
+    about = (f" kind={kind}" if kind else "") + (f" under {scope.spec}" if scope else "")
     if not ranked:
         return f'No symbols match "{query}"{about}.'
 
@@ -69,6 +106,58 @@ def search_symbols(conn: sqlite3.Connection, query: str, kind: str | None, limit
         hint = more_hint(len(ranked), shown, limit, MAX_LIMIT)
         lines.append(truncated(len(ranked) - shown, None, hint))
     return "\n".join(lines)
+
+
+def _scope(conn: sqlite3.Connection, path: str) -> Scope:
+    """normalize_path strips slashes, but a trailing '/' means "this is a directory"."""
+    spec = normalize_path(conn, path)
+    if path.strip().endswith(("/", "\\")) and "/" not in spec:
+        spec += "/"
+    return scope_of(spec)
+
+
+def _list_scope(
+    conn: sqlite3.Connection, scope: Scope, files: list[FileRow], kind: str | None, limit: int
+) -> str:
+    """Everything a scope defines, types first, under a header with counts per kind."""
+    symbols = sorted(scope_symbols(conn, scope, kind), key=symbol_rank_key)
+    where = f" under {scope.spec} ({len(files)} file{'s' if len(files) != 1 else ''})"
+    about = f" kind={kind}" if kind else ""
+    if not symbols:
+        return f"No symbols{about}{where}."
+    head = f"{len(symbols)} symbol{'s' if len(symbols) != 1 else ''}{about}{where}"
+    if kind is None:
+        counts = Counter(s.kind for s in symbols)
+        head += ": " + ", ".join(f"{k} {counts[k]}" for k in KINDS if counts[k])
+    entries = [Entry(s.path, symbol_line(s)) for s in symbols[:limit]]
+    lines, shown = fit_grouped([head], entries, CAPS["search_symbols"])
+    if shown < len(symbols):
+        dropped = Counter(kind_plural(s.kind) for s in symbols[shown:])
+        detail = ", ".join(f"{k} {n}" for k, n in dropped.most_common())
+        hint = more_hint(len(symbols), shown, limit, MAX_LIMIT)
+        lines.append(truncated(len(symbols) - shown, detail, hint))
+    return "\n".join(lines)
+
+
+def _no_such_scope(conn: sqlite3.Connection, scope: Scope) -> str:
+    """Suggest directory, file or module names close to the last segment asked for."""
+    names: set[str] = set()
+    for r in conn.execute("SELECT path, module FROM files"):
+        *dirs, name = r["path"].split("/")
+        names.update(dirs)
+        names.add(name.rsplit(".", 1)[0])
+        names.update(r["module"].split(".") if r["module"] else [])
+    stem = scope.spec
+    for suffix in SOURCE_SUFFIXES:
+        stem = stem.removesuffix(suffix)
+    last = re.split(r"[/.]", stem.strip("/."))[-1]
+    close = difflib.get_close_matches(last, sorted(names), n=3, cutoff=0.75)
+    hint = f" Similar names: {', '.join(close)}." if close else ""
+    return clip(
+        f'No indexed file under "{scope.spec}".{hint} Pass a directory ("model/"), a file'
+        ' ("Order.java") or a package or module ("com.x.model", "inventory.models").',
+        500,
+    )
 
 
 def get_symbol(conn: sqlite3.Connection, symbol: str, max_lines: int) -> str:
