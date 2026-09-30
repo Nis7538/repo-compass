@@ -1,6 +1,5 @@
 """diff_impact on a scripted git history (tests/shop_history.py). Outputs are literal."""
 
-import os
 import shutil
 
 import pytest
@@ -9,23 +8,7 @@ from compass.indexer.pipeline import index_repo
 from compass.store.db import open_index
 from compass.tools.impact import diff_impact
 from tests.gitrepo import ScriptedRepo
-from tests.shop_history import JAVA, SALES_REPORT, shop_history
-
-
-def _isolated(mp: pytest.MonkeyPatch) -> None:
-    mp.setenv("GIT_CONFIG_GLOBAL", os.devnull)
-    mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
-
-
-@pytest.fixture(scope="module")
-def shop(tmp_path_factory):
-    """The shop history with feature checked out, and its index. Read-only."""
-    with pytest.MonkeyPatch.context() as mp:
-        _isolated(mp)
-        tmp = tmp_path_factory.mktemp("shop")
-        repo = shop_history(ScriptedRepo(tmp / "repo"))
-        index_repo(repo.root, tmp / "index.db")
-        yield repo, tmp / "index.db"
+from tests.shop_history import JAVA, SALES_REPORT
 
 
 @pytest.fixture
