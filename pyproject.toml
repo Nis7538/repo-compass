@@ -6,13 +6,17 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
-    "anthropic>=0.52",
     "mcp>=2.2,<3",
     "tree-sitter>=0.24",
     "tree-sitter-java>=0.23",
     "tree-sitter-python>=0.23",
     "typer>=0.15",
 ]
+
+[project.optional-dependencies]
+# Only for code that calls the Claude API: the M4 review agent, the M5 eval runner and
+# scripts/calibrate_tokens.py. The MCP server and the index never import it.
+agent = ["anthropic>=0.52"]
 
 [project.scripts]
 compass = "compass.cli:app"

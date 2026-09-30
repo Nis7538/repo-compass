@@ -24,7 +24,7 @@ The full plan is in PLAN.md. Follow it milestone by milestone.
 - GitHub Actions for CI
 
 ## Commands (keep these working; update here if they change)
-- `uv sync` — install
+- `uv sync` — install (`uv sync --extra agent` adds the anthropic SDK, needed only by code that calls the Claude API)
 - `uv run pytest -q` — tests
 - `uv run ruff check . && uv run ruff format --check .` — lint
 - `uv run compass --help` — CLI

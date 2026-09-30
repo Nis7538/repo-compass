@@ -688,12 +688,16 @@ name = "repo-compass"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "anthropic" },
     { name = "mcp" },
     { name = "tree-sitter" },
     { name = "tree-sitter-java" },
     { name = "tree-sitter-python" },
     { name = "typer" },
+]
+
+[package.optional-dependencies]
+agent = [
+    { name = "anthropic" },
 ]
 
 [package.dev-dependencies]
@@ -704,13 +708,14 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.52" },
+    { name = "anthropic", marker = "extra == 'agent'", specifier = ">=0.52" },
     { name = "mcp", specifier = ">=2.2,<3" },
     { name = "tree-sitter", specifier = ">=0.24" },
     { name = "tree-sitter-java", specifier = ">=0.23" },
     { name = "tree-sitter-python", specifier = ">=0.23" },
     { name = "typer", specifier = ">=0.15" },
 ]
+provides-extras = ["agent"]
 
 [package.metadata.requires-dev]
 dev = [
