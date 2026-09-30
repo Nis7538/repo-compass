@@ -1,6 +1,6 @@
 # MCP tool reference
 
-`compass serve --repo <path>` exposes six read-only tools over stdio. Every answer is plain
+`compass serve --repo <path>` exposes eight read-only tools over stdio. Every answer is plain
 text meant for a model to read. The rules below apply to all of them. The reasons are in
 [ADR-005](adr/005-tool-output-format.md).
 
@@ -39,12 +39,12 @@ for typical code (ADR-005). `tests/test_token_caps.py` also checks that this tab
 | `find_references` | 2,000 | ~350 |
 | `file_outline` | 1,500 | ~250 |
 | `module_dependencies` | 1,200 | ~250 |
-| `diff_impact` | 2,000 | ~600 |
-| `hotspots` | 1,200 | ~400 |
+| `diff_impact` | 2,000 | ~450 |
+| `hotspots` | 1,200 | ~350 |
 
 Answers that are only an error or a status message (unknown symbol, index still building)
-stay under 200 tokens. All six tool definitions together (names, descriptions, input
-schemas) stay under 1,200 tokens. A client sends them to the model on every turn.
+stay under 200 tokens. All eight tool definitions together (names, descriptions, input
+schemas) stay under 1,500 tokens (1,322 now). A client sends them to the model on every turn.
 
 ## repo_summary(limit=10)
 
@@ -226,3 +226,156 @@ cycles: none
 Limits: Java classes used from the same package, or written fully qualified without an
 import, create no edge. Python imports inside functions count like top-level imports.
 Dynamic imports are invisible.
+
+## diff_impact(base, head=None, limit=10)
+
+What a change touches, and who outside it depends on what changed. Like a pull request,
+the diff runs from the merge base of `base` and `head` (`base...head`) to `head`. `head`
+is a branch, tag or commit; the default is the working tree, uncommitted and untracked
+files included. So `diff_impact("main")` answers "what can my current edits break?".
+
+1. **Files** are compared by git blob id. There is no rename detection: a moved file is one
+   deletion and one addition.
+2. **Symbols.** Both versions of each changed Java/Python file are parsed with the
+   indexer's own extractors and compared symbol by symbol. This part is exact. A symbol is
+   `removed`, `added`, `signature` (declaration text, decorators/annotations, parameter
+   count) or `body` (its own lines, without its children's and without any whitespace).
+   So a changed method does not also mark its class. A method that was only moved,
+   re-indented or reformatted is not reported. Symbols are matched by qualified name across
+   all changed files, so a class moved to another file of its package is not a change.
+   Editing a member's Javadoc does not mark the class; a comment edit inside a method body
+   does count.
+3. **Callers** come from the resolver, with the same tiers as `find_references`, so this
+   part is approximate. Each caller is *inside* the diff (its file changed too, so it was
+   probably updated) or *outside* (untouched: the real risk). For a **removed** symbol, the
+   old version is put back into the resolver, so the call sites that would still bind to
+   it are found: the uses the change left **dangling**. Imports that name it are counted
+   too. For a **signature** change, callers of the old and the new declaration are both
+   counted. A Java call that still passes the old number of arguments no longer binds to
+   the new method, and it is the call most likely to be broken.
+4. **Ranking:** removed and signature changes with exact or likely callers outside the diff
+   (or any dangling use), then body changes with such callers, then the other removed and
+   signature changes, then the other body changes, then added symbols. Within a group:
+   production before tests, then more exact+likely callers. `possible` callers are counted
+   and shown but never raise a symbol's rank: a method named `process` with 100 name-only
+   matches must not top the list.
+
+Each entry is at its line in `head` (`-14` = removed, the line it had in the base), with up
+to three example callers after `<-`, best first. The full list is one `find_references`
+away. The last line lists files outside the diff that import a touched module. Example from
+the test history (tests/shop_history.py), 448 tokens:
+
+```
+diff main...HEAD (merge base 6e9cdb5): 4 code files changed (1 test), 1 other file; 7 symbols changed (removed 2, signature 1, body 3, added 1)
+modules touched 3: com.example.shop.model, com.example.shop.service, inventory.stock
+inventory/stock.py
+  -11 removed function release  dangling: 1 call (exact 1), 1 import
+    <- sync (sync.py:9), import at sync.py:3
+shop/src/main/java/com/example/shop/model/Order.java
+  -14 removed method Order.addIfAbsent  dangling: 2 calls (likely 2), 0 imports
+    <- ImportJob.run (ImportJob.java:10), OrderTest.addsOnce (OrderTest.java:6)
+  9 signature method Order.add  public Order add(Item item, int qty)
+    was: public Order add(Item item)
+    callers 3, outside the diff 1 (likely 1)
+    <- ImportJob.run (ImportJob.java:9)
+  16 body method Order.total  callers 3, outside the diff 1 (likely 1)
+    <- SalesReport.sum (SalesReport.java:7)
+  24 added method Order.clear  public void clear()
+shop/src/main/java/com/example/shop/service/CartService.java
+  9 body method CartService.addToCart  callers 0
+shop/src/test/java/com/example/shop/model/OrderTest.java
+  9 body method OrderTest.totals  callers 0
+importers of touched modules outside the diff: 3 files (0 tests): inventory/sync.py, shop/src/main/java/com/example/shop/job/ImportJob.java, shop/src/main/java/com/example/shop/report/SalesReport.java
+```
+
+`Order.add` has 3 callers although only CartService and ImportJob call it: `items.add(item)`
+inside `Order.add` itself is counted as a likely call too. That is the known false positive
+for common method names ([ADR-003](adr/003-reference-resolution.md)); it is inside the
+diff, so it does not affect the ranking.
+
+The header totals never shrink with the limit. The truncation marker says what kinds were
+cut and whether any of them had callers outside the diff:
+`[truncated: 4 more symbols (body 3, added 1; 1 with callers outside the diff)] limit=7 shows all`.
+When a long signature changes past the 120-character clip, both versions are clipped from
+just before the first difference (`…argumentNumber5, int extra)`).
+
+Answers without a diff are one line: `Unknown ref "mian". Branches: main, feature, tweak.
+Also works: a tag, a commit, HEAD~3.`, `No changes between main and main.`, `No Java or
+Python files changed (1 other file).`, `other and working tree share no history (no merge
+base).`, `Not a git repository: ... the other tools work without it.` A ref starting with
+`-` is refused, since git would read it as an option.
+
+Limits:
+- Callers and importers come from the index, which follows the working tree. For a `head`
+  other than the checked-out commit, the header says so.
+- No override or dispatch analysis: changing an interface method does not flag its
+  implementations, and callers through the interface are found only by name.
+- Field uses are not indexed (`uses not indexed`). Java classes used from their own package
+  need no import, so the importers line undercounts them.
+- Module-level code that is not a symbol (imports, constants, statements) is not reported;
+  the file still counts as changed.
+- An edit that only adds or removes spaces inside a string literal is missed (whitespace is
+  ignored).
+- Working-tree files are compared with their committed blob as they are, and with CRLF
+  turned into LF (a `core.autocrlf=true` checkout). Other checkout conversions (`ident`,
+  `working-tree-encoding`, smudge filters) are not undone, so such files show as changed.
+- At most 300 changed code files are parsed (by path), and callers are looked up for at most
+  200 changed symbols (removed and signature changes first). The header says when either
+  bound was hit.
+
+## hotspots(since=None, limit=10, include_tests=False)
+
+Files that change often and hold a lot of code, which is where bugs tend to collect.
+
+- **score = churn × size**, per file.
+- **churn**: non-merge commits in the window that touched the file. Renames are followed
+  forward, so commits made under an old name count for today's path. Only indexed files
+  count; deleted files drop out.
+- **size**: lines inside outermost methods, functions and constructors, from the index. A
+  nested function is not counted twice. Imports, constants and data declarations are left
+  out, so a 900-line constants file does not outrank real logic.
+- Ties go to more commits, then path. Each line names the file's longest method, which is
+  where to point `get_symbol` next, and the date of its latest commit in the window.
+- **since**: a ref (`v1.2`, `main~50`: the commits after it, up to HEAD) if it names a
+  commit, otherwise a date git understands (`6 months ago`, `2026-01-01`; a bare date means
+  midnight UTC). Default: `1 year ago`. The header shows the date git read, because git's
+  date parser never fails: `yesterdya` is read as today, and a year after 2099 as January
+  1st of this year.
+
+Example from the test history, 316 tokens:
+
+```
+hotspots since 2026-01-01: 7 commits (merges skipped), 9 of 9 indexed files changed; left out: 1 test file
+score = commits x lines inside methods/functions, per file. Renames followed.
+  114 = 6 x 19  shop/src/main/java/com/example/shop/model/Order.java  largest Order.total 7 lines, last 2026-03-02
+  18 = 3 x 6  shop/src/main/java/com/example/shop/service/CartService.java  largest CartService.addToCart 3 lines, last 2026-03-02
+  8 = 2 x 4  inventory/sync.py  largest sync 4 lines, last 2026-01-19
+  6 = 2 x 3  inventory/stock.py  largest reserve 3 lines, last 2026-03-02
+  6 = 1 x 6  shop/src/main/java/com/example/shop/job/ImportJob.java  largest ImportJob.run 6 lines, last 2026-01-05
+  3 = 1 x 3  shop/src/main/java/com/example/shop/report/SalesReport.java  largest SalesReport.sum 3 lines, last 2026-01-05
+  0 = 1 x 0  inventory/__init__.py  last 2026-01-05
+  0 = 1 x 0  shop/src/main/java/com/example/shop/model/Item.java  last 2026-01-05
+```
+
+`inventory/sync.py` has 2 commits: one made when it was still `sync_job.py`, and its rename.
+
+With no commits in the window: `No commits since "2027-01-01" (read as 2027-01-01). since
+takes a date git understands ("6 months ago", "2026-01-01") or a ref ("v1.2").`
+
+Limits: per file, not per method. It counts commits, not lines changed, so a mass reformat
+counts like any other commit. Uncommitted edits are not churn. Sizes come from the working
+tree. A shallow clone undercounts, and the header says `note: shallow clone`. At most 5,000
+commits are read, and the header says when that bound is hit. Test files are left out
+unless `include_tests=True`, and the header says how many.
+
+## Git safety
+
+Both git tools only read. `src/compass/gitrepo.py` is the only place that starts git. It
+runs without a shell, with a timeout, with `GIT_OPTIONAL_LOCKS=0` so `.git/index` is not
+refreshed as a side effect, with `--no-pager`, and with `-c core.fsmonitor=false -c
+log.showSignature=false`. `git log` also gets `--no-ext-diff --no-textconv`. Git is never
+asked to read a working-tree file, because a clean filter named in `.gitattributes` would
+run, and no flag turns that off. Working-tree files are hashed in Python instead.
+`tests/test_git_safety.py` sets every one of these hooks to a command that leaves a marker
+file, checks that indexing and both tools leave none, and checks that plain git does fire
+them.
