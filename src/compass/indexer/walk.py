@@ -12,9 +12,10 @@ file is read (see is_binary).
 
 import os
 import stat
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+
+from compass.gitrepo import GitError, tracked_and_untracked
 
 LANGUAGES = {".java": "java", ".py": "python"}
 
@@ -65,9 +66,8 @@ def discover(root: Path) -> tuple[list[SourceFile], str]:
 
     files = []
     for rel in sorted(set(rel_paths)):
-        pure = PurePosixPath(rel)
-        language = LANGUAGES.get(pure.suffix)
-        if language is None or any(part in SKIP_DIRS for part in pure.parts[:-1]):
+        language = language_of(rel)
+        if language is None:
             continue
         abs_path = root / rel
         try:
@@ -80,6 +80,18 @@ def discover(root: Path) -> tuple[list[SourceFile], str]:
     return files, method
 
 
+def language_of(path: str) -> str | None:
+    """'java' or 'python' for a repo-relative path the indexer would take, else None.
+
+    Only the name is checked (suffix, vendored/build directories), not size or content.
+    """
+    pure = PurePosixPath(path)
+    language = LANGUAGES.get(pure.suffix)
+    if language is None or any(part in SKIP_DIRS for part in pure.parts[:-1]):
+        return None
+    return language
+
+
 def is_binary(data: bytes) -> bool:
     return b"\0" in data[:8192]
 
@@ -87,17 +99,9 @@ def is_binary(data: bytes) -> bool:
 def _git_files(root: Path) -> list[str] | None:
     """Tracked plus untracked-but-not-ignored files, relative to root. None if not git."""
     try:
-        proc = subprocess.run(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-            cwd=root,
-            capture_output=True,
-            check=False,
-        )
-    except (FileNotFoundError, NotADirectoryError):  # git not installed / bad root
+        return tracked_and_untracked(root)
+    except GitError:  # not a repository, git not installed, bad root
         return None
-    if proc.returncode != 0:
-        return None
-    return [p for p in proc.stdout.decode("utf-8", errors="replace").split("\0") if p]
 
 
 def _walk_files(root: Path) -> list[str]:
