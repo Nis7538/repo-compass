@@ -51,7 +51,8 @@ dangling uses of removed ones) and `hotspots` (files ranked by commits x lines i
 methods). Answers are compact text, ranked, and capped per
 tool with an explicit `[truncated: N more]` line. Formats, ranking rules and token caps:
 [docs/tools.md](docs/tools.md). An end-to-end run in Claude Code on commons-lang and flask,
-including what went wrong: [docs/e2e-m2.md](docs/e2e-m2.md).
+including what went wrong: [docs/e2e-m2.md](docs/e2e-m2.md); for the git tools,
+[docs/e2e-m3.md](docs/e2e-m3.md).
 
 ## Limitations
 

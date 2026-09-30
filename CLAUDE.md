@@ -35,6 +35,7 @@ The full plan is in PLAN.md. Follow it milestone by milestone.
 - `uv run pytest -q -m "not slow"` — tests without the 50k-line benchmark and the stdio subprocess test
 - `uv run python scripts/bench_index.py <path> | --synthetic 50000` — indexing benchmark
 - `uv run python scripts/calibrate_tokens.py [--repo <path>]` — token estimate vs real `count_tokens` (manual only, never in CI; needs `--extra agent` and an API key)
+- `uv run python scripts/e2e_claude.py --repo <path> "question" [--builtin]` — headless Claude Code run with the compass tools (manual only, never in CI; costs API usage)
 
 ## Guardrails
 - Tool outputs returned to agents must be size-capped and truncated with an explicit "truncated, N more" marker. Token efficiency is a core feature.

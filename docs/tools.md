@@ -39,8 +39,8 @@ for typical code (ADR-005). `tests/test_token_caps.py` also checks that this tab
 | `find_references` | 2,000 | ~350 |
 | `file_outline` | 1,500 | ~250 |
 | `module_dependencies` | 1,200 | ~250 |
-| `diff_impact` | 2,000 | ~450 |
-| `hotspots` | 1,200 | ~350 |
+| `diff_impact` | 2,000 | 250–800 |
+| `hotspots` | 1,200 | ~400 |
 
 Answers that are only an error or a status message (unknown symbol, index still building)
 stay under 200 tokens. All eight tool definitions together (names, descriptions, input
@@ -263,7 +263,7 @@ files included. So `diff_impact("main")` answers "what can my current edits brea
 Each entry is at its line in `head` (`-14` = removed, the line it had in the base), with up
 to three example callers after `<-`, best first. The full list is one `find_references`
 away. The last line lists files outside the diff that import a touched module. Example from
-the test history (tests/shop_history.py), 448 tokens:
+the test history (tests/shop_history.py), 450 tokens:
 
 ```
 diff main...HEAD (merge base 6e9cdb5): 4 code files changed (1 test), 1 other file; 7 symbols changed (removed 2, signature 1, body 3, added 1)
