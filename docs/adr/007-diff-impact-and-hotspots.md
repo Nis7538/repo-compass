@@ -99,8 +99,10 @@ git read, because git's date parser never fails.
 - Callers are from the working-tree index even when `head` is another commit; the header
   says so. No override or dispatch analysis: changing an interface method does not flag
   its implementations.
-- Each diff_impact call starts about ten short git processes and hashes the tracked files.
-  That is under a second on the test repos. On Windows each git process costs about 50ms.
+- Each diff_impact call starts about ten short git processes, parses both versions of every
+  changed file, and for the working tree hashes every tracked file. Twenty commits took
+  1.2s on flask and 3.9s on commons-lang, mostly parsing (docs/e2e-m3.md). On Windows
+  each git process costs about 50ms.
 - Hotspots counts commits, not lines, and undercounts in shallow clones (flagged).
 - The tool-list budget grew from 1,200 to 1,500 tokens (ADR-005): the eight tool
   definitions measure 1,322.
