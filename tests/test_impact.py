@@ -6,7 +6,7 @@ import pytest
 
 from compass.indexer.pipeline import index_repo
 from compass.store.db import open_index
-from compass.tools.impact import diff_impact
+from compass.tools.impact import clip_pair, diff_impact
 from tests.gitrepo import ScriptedRepo
 from tests.shop_history import JAVA, SALES_REPORT
 
@@ -186,3 +186,14 @@ def test_class_moved_to_its_own_file_is_not_dangling(tmp_path):
         "no symbol changed: the edits are outside any class, method or function"
         " (imports, constants, module-level code)"
     )
+
+
+def test_long_signatures_are_clipped_where_they_differ():
+    params = ", ".join(f"Map<String, Integer> argumentNumber{k}" for k in range(6))
+    old = f"public int m({params})"
+    new = f"public int m({params}, int extra)"
+    shown_new, shown_old = clip_pair(new, old, 120)
+    assert shown_new.endswith("argumentNumber5, int extra)")
+    assert shown_old.endswith("argumentNumber5)")
+    assert shown_new.startswith("…") and len(shown_new) <= 120
+    assert clip_pair("f(a)", "f(b)", 120) == ("f(a)", "f(b)")

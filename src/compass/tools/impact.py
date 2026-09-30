@@ -52,7 +52,15 @@ from compass.tools.changes import (
 from compass.tools.deps import import_target, type_modules
 from compass.tools.rank import SIGNATURE_WIDTH, is_test_path
 from compass.tools.references import rank_references
-from compass.tools.render import Entry, clip, common_dir, fit_grouped, more_hint, truncated
+from compass.tools.render import (
+    ELLIPSIS,
+    Entry,
+    clip,
+    common_dir,
+    fit_grouped,
+    more_hint,
+    truncated,
+)
 
 MAX_PARSED_FILES = 300
 MAX_LOOKUPS = 200
@@ -379,10 +387,12 @@ def _entry_text(conn: sqlite3.Connection, impact: Impact) -> str:
     line = f"-{s.start_line}" if c.change == REMOVED else str(s.start_line)
     first = f"{line} {c.change} {s.kind} {_short(c)}"
     detail: list[str] = []
-    if c.change in (SIGNATURE, ADDED):
+    if c.change == ADDED:
         first += f"  {clip(s.signature, SIGNATURE_WIDTH)}"
     if c.change == SIGNATURE:
-        detail.append(f"was: {clip(c.was.signature, SIGNATURE_WIDTH)}")
+        new, old = clip_pair(s.signature, c.was.signature, SIGNATURE_WIDTH)
+        first += f"  {new}"
+        detail.append(f"was: {old}")
     if c.change != ADDED:
         summary = impact.note or _callers_summary(impact)
         if c.change == SIGNATURE:
@@ -395,6 +405,25 @@ def _entry_text(conn: sqlite3.Connection, impact: Impact) -> str:
     # Every part is already clipped (names come from source, and are short), so the
     # lines are joined as they are; clip() would also collapse the two-space gaps.
     return "\n".join([first] + ["    " + d for d in detail])
+
+
+def clip_pair(new: str, old: str, width: int) -> tuple[str, str]:
+    """Clip two versions of a signature so the part that differs stays visible.
+
+    Clipping both at the end would show two identical prefixes when a long signature
+    changes near its end (a parameter added last). Instead both start a little
+    before the first character that differs, with a leading '…'.
+    """
+    new, old = " ".join(new.split()), " ".join(old.split())
+    if max(len(new), len(old)) <= width:
+        return new, old
+    first_diff = next(
+        (i for i, (a, b) in enumerate(zip(new, old)) if a != b), min(len(new), len(old))
+    )
+    if first_diff < width - 20:
+        return clip(new, width), clip(old, width)
+    start = first_diff - 30
+    return clip(ELLIPSIS + new[start:], width), clip(ELLIPSIS + old[start:], width)
 
 
 def _callers_summary(impact: Impact) -> str:
