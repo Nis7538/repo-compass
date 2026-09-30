@@ -32,6 +32,13 @@ class ScriptedRepo:
         self.git("config", "core.autocrlf", "false")
         self.git("config", "commit.gpgsign", "false")
 
+    @classmethod
+    def existing(cls, root: Path) -> "ScriptedRepo":
+        """Wrap a repository that is already there (a copy of one built earlier)."""
+        repo = cls.__new__(cls)
+        repo.root = root
+        return repo
+
     def git(self, *args: str, date: str = DEFAULT_DATE) -> str:
         env = {**os.environ, **AUTHOR, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
         proc = subprocess.run(

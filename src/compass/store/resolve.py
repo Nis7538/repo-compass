@@ -72,8 +72,24 @@ class Resolver:
         self._py_modules: dict[str, bool] = {}
         self._reexports: dict[str, str] = {}
         self._java_types: dict[tuple, str | None] = {}
+        self._virtual: list[SymbolRow] = []
 
     # --- public API ------------------------------------------------------------------
+
+    def add_virtual(self, symbols: list[SymbolRow]) -> None:
+        """Resolve as if these symbols were in the index too.
+
+        diff_impact passes symbols a change removed (rebuilt from the old version of
+        the file, with negative ids), so find_references on one returns the call
+        sites that would still bind to it: uses the change left dangling.
+        """
+        self._virtual.extend(symbols)
+        for s in symbols:
+            self._symbols[s.id] = s
+        self._by_name.clear()
+        self._by_qn.clear()
+        self._reexports.clear()
+        self._java_types.clear()
 
     def resolve_ref(self, ref: RefRow) -> list[Resolution]:
         """Symbols this call site may refer to, all in the best tier found."""
@@ -413,6 +429,9 @@ class Resolver:
             self._by_name[key] = [symbol_row(r) for r in rows]
             for s in self._by_name[key]:
                 self._symbols[s.id] = s
+            self._by_name[key] += [
+                v for v in self._virtual if v.language == language and v.name == name
+            ]
         return self._by_name[key]
 
     def _by_qualified(self, qualified_name: str) -> list[SymbolRow]:
@@ -420,7 +439,9 @@ class Resolver:
             rows = self.conn.execute(
                 SYMBOL_SELECT + " WHERE s.qualified_name = ?", (qualified_name,)
             )
-            self._by_qn[qualified_name] = [symbol_row(r) for r in rows]
+            self._by_qn[qualified_name] = [symbol_row(r) for r in rows] + [
+                v for v in self._virtual if v.qualified_name == qualified_name
+            ]
         return self._by_qn[qualified_name]
 
     def _type_by_qn(self, qualified_name: str) -> SymbolRow | None:

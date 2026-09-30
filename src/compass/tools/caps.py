@@ -14,6 +14,8 @@ CAPS = {
     "find_references": 2000,
     "file_outline": 1500,
     "module_dependencies": 1200,
+    "diff_impact": 2000,
+    "hotspots": 1200,
 }
 
 # A response that is only a status or error message (no index yet, unknown symbol, ...).

@@ -68,16 +68,7 @@ def build_graph(conn: sqlite3.Connection, include_tests: bool = False) -> Graph:
     tests = {f["id"] for f in files if is_test_path(f["path"])}
     kept = {f["id"] for f in files if include_tests or f["id"] not in tests}
     modules: Counter = Counter(f["module"] for f in files if f["id"] in kept)
-    kinds = ",".join("?" * len(TYPE_KINDS))
-    type_module = {
-        r["qualified_name"]: r["module"]
-        for r in conn.execute(
-            "SELECT s.qualified_name, s.file_id, f.module FROM symbols s"
-            f" JOIN files f ON f.id = s.file_id WHERE s.kind IN ({kinds})",
-            sorted(TYPE_KINDS),
-        )
-        if r["file_id"] in kept
-    }
+    type_module = type_modules(conn, kept)
     graph = Graph(dict(modules), test_files=len(tests), include_tests=include_tests)
     deferred_at = _function_ranges(conn)
     rows = conn.execute(
@@ -92,7 +83,7 @@ def build_graph(conn: sqlite3.Connection, include_tests: bool = False) -> Graph:
         if r["is_type_only"]:
             graph.type_only += 1
             continue
-        dst = _target(r["language"], r["module"], r["name"], modules, type_module)
+        dst = import_target(r["language"], r["module"], r["name"], modules, type_module)
         if dst is None:
             graph.external[r["src"]][_external_name(r["language"], r["module"])] += 1
         elif dst != r["src"]:
@@ -124,7 +115,22 @@ def _inside(ranges: list[tuple[int, int]], line: int) -> bool:
     return any(start < line <= end for start, end in ranges)
 
 
-def _target(language, module, name, modules, type_module) -> str | None:
+def type_modules(conn: sqlite3.Connection, kept: set[int] | None = None) -> dict[str, str]:
+    """Qualified name of every indexed type -> the module it is in (from kept files only)."""
+    kinds = ",".join("?" * len(TYPE_KINDS))
+    return {
+        r["qualified_name"]: r["module"]
+        for r in conn.execute(
+            "SELECT s.qualified_name, s.file_id, f.module FROM symbols s"
+            f" JOIN files f ON f.id = s.file_id WHERE s.kind IN ({kinds})",
+            sorted(TYPE_KINDS),
+        )
+        if kept is None or r["file_id"] in kept
+    }
+
+
+def import_target(language, module, name, modules, type_module) -> str | None:
+    """The module one import statement imports, if it is one of `modules`; else None."""
     if language == "python":
         if name and name != "*" and f"{module}.{name}" in modules:
             return f"{module}.{name}"

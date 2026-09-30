@@ -39,6 +39,8 @@ for typical code (ADR-005). `tests/test_token_caps.py` also checks that this tab
 | `find_references` | 2,000 | ~350 |
 | `file_outline` | 1,500 | ~250 |
 | `module_dependencies` | 1,200 | ~250 |
+| `diff_impact` | 2,000 | ~600 |
+| `hotspots` | 1,200 | ~400 |
 
 Answers that are only an error or a status message (unknown symbol, index still building)
 stay under 200 tokens. All six tool definitions together (names, descriptions, input
