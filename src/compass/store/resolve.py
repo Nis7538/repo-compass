@@ -153,7 +153,11 @@ class Resolver:
                     return LIKELY
                 return POSSIBLE
             target = self._expand_python(receiver, bindings)
-            if target is not None and self._follow_reexport(target) == cand.module:
+            if target is not None and (
+                self._follow_reexport(target) == cand.module
+                # `flask.flash()`: the package re-exports flash from flask.helpers
+                or self._follow_reexport(f"{target}.{ref.name}") == cand.qualified_name
+            ):
                 return EXACT
             return None  # an attribute of something that is not cand's module
 

@@ -290,3 +290,19 @@ def test_static_method_called_on_an_expression_is_only_possible(tmp_path):
         ("lookup", "get"): {"possible"},
         ("v", "next"): {"likely"},  # instance methods keep the likely tier
     }
+
+
+def test_python_call_through_a_package_reexport_is_exact(tmp_path):
+    # flask style: `import flask; flask.flash(...)` where flask/__init__.py re-exports it.
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("from .helpers import flash as flash\n")
+    (tmp_path / "pkg" / "helpers.py").write_text("def flash(message):\n    return message\n")
+    (tmp_path / "use.py").write_text("import pkg\n\npkg.flash('hi')\n")
+    index_repo(tmp_path, tmp_path / "i.db")
+    conn = open_index(tmp_path / "i.db")
+    try:
+        ref = ref_row(conn.execute(REF_SELECT + " WHERE f.path = 'use.py'").fetchone())
+        found = {(r.symbol.qualified_name, r.confidence) for r in Resolver(conn).resolve_ref(ref)}
+    finally:
+        conn.close()
+    assert found == {("pkg.helpers.flash", "exact")}

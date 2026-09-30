@@ -57,7 +57,9 @@ index. Its cost is a few indexed lookups per candidate call site, cached per que
   text `B`, not by resolving `B` first. Deeper hierarchies degrade to `possible`.
 - **Overloads are split by argument count only**, not argument types.
 - **Python:** `cls()` / `type(self)()` are not linked to the class. Re-exports through
-  `__init__.py` are followed one level. `from x import *` gives `likely`, never `exact`.
+  `__init__.py` are followed one level, for `from flask import flash` and, since M3, for
+  `flask.flash()` (the M3 end-to-end run missed flask's test calls written that way).
+  `from x import *` gives `likely`, never `exact`.
   Functions stored in variables, `getattr`, and monkeypatching are invisible.
 - **Java:** reflection, dependency injection (Spring), generated code (Lombok getters,
   annotation processors) and members of anonymous classes are invisible. Static-nested
