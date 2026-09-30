@@ -79,7 +79,7 @@ roughly 3 to 4 characters per token, so dividing by 3 overestimates, which is th
 direction for a ceiling. This is an estimate, not a measurement. It has not been
 calibrated against the real tokenizer yet: the Claude Code stream reports usage per turn,
 not per tool result, and the optional `count_tokens` calibration script was not written in
-M2. If the estimate turns out to be badly off, the fix is one constant, `CHARS_PER_TOKEN`.
+M2. It exists since M3 (`scripts/calibrate_tokens.py`, manual only) and has not been run yet. If the estimate turns out to be badly off, the fix is one constant, `CHARS_PER_TOKEN`.
 
 ### No numeric symbol ids
 PLAN.md sketched `get_symbol(id | qualified_name)`. Row ids are not stable. Reindexing a
