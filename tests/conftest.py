@@ -1,10 +1,22 @@
 """Shared pytest fixtures."""
 
+import os
 import shutil
 
 import pytest
 
 from tests.helpers import FIXTURES
+
+
+@pytest.fixture(autouse=True)
+def isolated_git(monkeypatch):
+    """Keep the machine's git config out of every test: no user or system config file.
+
+    Without this a developer's global settings (autocrlf, a pager, fsmonitor, signing)
+    would change what both the test helpers and the code under test see.
+    """
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
 @pytest.fixture
