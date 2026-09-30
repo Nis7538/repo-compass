@@ -1,16 +1,11 @@
 """Shared pytest fixtures."""
 
-import os
 import shutil
 
 import pytest
 
+from tests.gitrepo import hide_git_config
 from tests.helpers import FIXTURES
-
-
-def _hide_git_config(mp: pytest.MonkeyPatch) -> None:
-    mp.setenv("GIT_CONFIG_GLOBAL", os.devnull)
-    mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
 @pytest.fixture(autouse=True)
@@ -20,7 +15,7 @@ def isolated_git(monkeypatch):
     Without this a developer's global settings (autocrlf, a pager, fsmonitor, signing)
     would change what both the test helpers and the code under test see.
     """
-    _hide_git_config(monkeypatch)
+    hide_git_config(monkeypatch)
 
 
 @pytest.fixture(scope="session")
@@ -31,7 +26,7 @@ def shop(tmp_path_factory):
     from tests.shop_history import shop_history
 
     with pytest.MonkeyPatch.context() as mp:  # the autouse fixture is per test
-        _hide_git_config(mp)
+        hide_git_config(mp)
         tmp = tmp_path_factory.mktemp("shop")
         repo = shop_history(ScriptedRepo(tmp / "repo"))
         index_repo(repo.root, tmp / "index.db")

@@ -24,6 +24,12 @@ AUTHOR = {
 DEFAULT_DATE = "2026-02-03T10:00:00+00:00"
 
 
+def hide_git_config(mp) -> None:
+    """No global or system git config for git processes started while mp is active."""
+    mp.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
 class ScriptedRepo:
     def __init__(self, root: Path):
         self.root = root
