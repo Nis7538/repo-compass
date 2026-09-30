@@ -257,8 +257,16 @@ class _Walker:
 
 
 def _header(node: Node, body: Node) -> str:
-    """Source text of a def/class line: 'async def f(x) -> int', without the colon."""
-    source = node.text[: body.start_byte - node.start_byte].decode("utf-8", errors="replace")
+    """Source text of a def/class line: 'async def f(x) -> int', without the colon.
+
+    It stops at the colon that opens the body, so a comment after it
+    (`def f(x):  # note`) is not part of the signature.
+    """
+    colon = next(
+        (c for c in reversed(node.children) if c.type == ":" and c.end_byte <= body.start_byte),
+        body,
+    )
+    source = node.text[: colon.start_byte - node.start_byte].decode("utf-8", errors="replace")
     return one_line(source.rstrip().removesuffix(":"), MAX_SIGNATURE)
 
 

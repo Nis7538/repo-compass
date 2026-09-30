@@ -224,3 +224,9 @@ def test_imports_under_type_checking_are_type_only():
 def test_module_name(path, expected):
     package_dirs = {"src/inventory", "src/inventory/sub"}
     assert module_name(path, package_dirs) == expected
+
+
+def test_comment_after_the_colon_is_not_part_of_the_signature():
+    source = b"def f(x):  # note\n    return 1\n\n\nclass C(B):  # why\n    pass\n"
+    out = extract_python(source, "m")
+    assert [s.signature for s in out.symbols] == ["def f(x)", "class C(B)"]
