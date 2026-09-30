@@ -197,3 +197,17 @@ def test_long_signatures_are_clipped_where_they_differ():
     assert shown_old.endswith("argumentNumber5)")
     assert shown_new.startswith("…") and len(shown_new) <= 120
     assert clip_pair("f(a)", "f(b)", 120) == ("f(a)", "f(b)")
+
+
+def test_decorator_only_change_shows_the_decorators(tmp_path):
+    repo = ScriptedRepo(tmp_path / "repo")
+    repo.write("m.py", "def f():\n    return 1\n")
+    repo.commit("one")
+    repo.write("m.py", "@cache\ndef f():\n    return 1\n")
+    repo.commit("two")
+    conn = _index(repo, tmp_path)
+    try:
+        lines = diff_impact(conn, "main~1", "main", 10).split("\n")
+    finally:
+        conn.close()
+    assert lines[3:5] == ["  1 signature function f  @cache def f()", "    was: def f()"]

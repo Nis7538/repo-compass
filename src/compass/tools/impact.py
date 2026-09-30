@@ -390,7 +390,7 @@ def _entry_text(conn: sqlite3.Connection, impact: Impact) -> str:
     if c.change == ADDED:
         first += f"  {clip(s.signature, SIGNATURE_WIDTH)}"
     if c.change == SIGNATURE:
-        new, old = clip_pair(s.signature, c.was.signature, SIGNATURE_WIDTH)
+        new, old = clip_pair(_declared(s, c.was), _declared(c.was, s), SIGNATURE_WIDTH)
         first += f"  {new}"
         detail.append(f"was: {old}")
     if c.change != ADDED:
@@ -405,6 +405,13 @@ def _entry_text(conn: sqlite3.Connection, impact: Impact) -> str:
     # Every part is already clipped (names come from source, and are short), so the
     # lines are joined as they are; clip() would also collapse the two-space gaps.
     return "\n".join([first] + ["    " + d for d in detail])
+
+
+def _declared(symbol, other) -> str:
+    """The signature, led by its decorators/annotations when only those changed."""
+    if symbol.signature != other.signature or symbol.decorators == other.decorators:
+        return symbol.signature
+    return " ".join([*(f"@{d}" for d in symbol.decorators), symbol.signature])
 
 
 def clip_pair(new: str, old: str, width: int) -> tuple[str, str]:
