@@ -402,6 +402,10 @@ def _entry_text(conn: sqlite3.Connection, impact: Impact) -> str:
     examples = _examples(conn, impact)
     if examples:
         detail.append("<- " + ", ".join(examples))
+    if impact.imports:
+        # Imports get their own line: a dangling import fails the importing module as a
+        # whole, which matters more than any one call.
+        detail.append(_list_line("imported at", impact.imports))
     # Every part is already clipped (names come from source, and are short), so the
     # lines are joined as they are; clip() would also collapse the two-space gaps.
     return "\n".join([first] + ["    " + d for d in detail])
@@ -474,11 +478,7 @@ def _examples(conn: sqlite3.Connection, impact: Impact) -> list[str]:
             shown.setdefault(name, f"{name} ({where})")
         if len(shown) == EXAMPLE_CALLERS:
             break
-    examples = list(shown.values())
-    if impact.change.change == REMOVED:
-        room = EXAMPLE_CALLERS - len(examples)
-        examples += [f"import at {where}" for where in impact.imports[:room]]
-    return examples
+    return list(shown.values())
 
 
 def _caller_name(conn: sqlite3.Connection, symbol_id: int) -> str:

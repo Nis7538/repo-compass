@@ -270,7 +270,8 @@ diff main...HEAD (merge base 6e9cdb5): 4 code files changed (1 test), 1 other fi
 modules touched 3: com.example.shop.model, com.example.shop.service, inventory.stock
 inventory/stock.py
   -11 removed function release  dangling: 1 call (exact 1), 1 import
-    <- sync (sync.py:9), import at sync.py:3
+    <- sync (sync.py:9)
+    imported at: sync.py:3
 shop/src/main/java/com/example/shop/model/Order.java
   -14 removed method Order.addIfAbsent  dangling: 2 calls (likely 2), 0 imports
     <- ImportJob.run (ImportJob.java:10), OrderTest.addsOnce (OrderTest.java:6)
