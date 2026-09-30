@@ -436,7 +436,9 @@ def clip_pair(new: str, old: str, width: int) -> tuple[str, str]:
 def _callers_summary(impact: Impact) -> str:
     if impact.change.change == REMOVED:
         refs = impact.refs
-        calls = f"{len(refs)} call{_s(len(refs))}" + (f" ({_tiers(refs)})" if refs else "")
+        calls = f"{len(refs)} call{_s(len(refs))}" + (
+            f" ({_tiers(refs)}{_name_only(refs)})" if refs else ""
+        )
         imports = len(impact.imports)
         return f"dangling: {calls}, {imports} import{_s(imports)}"
     refs, outside = impact.refs, impact.outside
@@ -445,15 +447,25 @@ def _callers_summary(impact: Impact) -> str:
         text += f", outside the diff {len(outside)}"
     if outside:
         tests = sum(1 for r in outside if is_test_path(r.ref.path))
-        text += f" ({_tiers(outside)}" + (f"; {tests} in tests" if tests else "") + ")"
+        tested = f"; {tests} in tests" if tests else ""
+        text += f" ({_tiers(outside)}{_name_only(outside)}{tested})"
     return text
 
 
+def _name_only(refs: list[Reference]) -> str:
+    """', name matches only' when no reference is exact or likely."""
+    return "" if any(r.confidence in STRONG for r in refs) else ", name matches only"
+
+
 def _examples(conn: sqlite3.Connection, impact: Impact) -> list[str]:
-    """Up to three calling symbols, best-ranked first, each once: 'Cart.add (Cart.java:44)'."""
-    pool = impact.refs if impact.change.change == REMOVED else impact.outside
+    """Up to three calling symbols, best-ranked first, each once: 'Cart.add (Cart.java:44)'.
+
+    Only exact and likely callers. A name-only match shown as an example reads as a real
+    caller: in the M3 end-to-end run the model called Map.get sites the "blast radius"
+    of a static JavaVersion.get.
+    """
     shown: dict[str, str] = {}
-    for r in pool:
+    for r in impact.risky:
         where = f"{_file_name(r.ref.path)}:{r.ref.line}"
         if r.ref.enclosing_symbol_id is None:  # module-level code
             shown.setdefault(where, where)

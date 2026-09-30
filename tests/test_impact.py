@@ -211,3 +211,26 @@ def test_decorator_only_change_shows_the_decorators(tmp_path):
     finally:
         conn.close()
     assert lines[3:5] == ["  1 signature function f  @cache def f()", "    was: def f()"]
+
+
+def test_name_only_callers_are_counted_but_never_shown_as_examples(tmp_path):
+    repo = ScriptedRepo(tmp_path / "repo")
+    util = "package p;\n\nclass Util {\n    static int get(String s) { return 1; }\n}\n"
+    repo.write("p/Util.java", util)
+    repo.write(
+        "p/Use.java",
+        "package p;\n\nimport java.util.Map;\n\nclass Use {\n"
+        '    Object f(Map<String, Object> m) { return m.get("k"); }\n}\n',
+    )
+    repo.commit("one")
+    repo.write("p/Util.java", util.replace("return 1;", "return 2;"))
+    repo.commit("two")
+    conn = _index(repo, tmp_path)
+    try:
+        text = diff_impact(conn, "main~1", "main", 10)
+    finally:
+        conn.close()
+    assert text.split("\n")[3:] == [
+        "  4 body method Util.get  callers 1, outside the diff 1 (possible 1, name matches only)",
+        "importers of touched modules outside the diff: none",
+    ]
