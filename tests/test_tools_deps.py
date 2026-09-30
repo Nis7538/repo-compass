@@ -145,12 +145,26 @@ def test_test_files_are_left_out_of_the_graph(tmp_path):
     conn = open_index(tmp_path / "i.db")
     try:
         text = module_dependencies(conn, None, 10)
+        with_tests = module_dependencies(conn, None, 10, include_tests=True)
+        b_with_tests = module_dependencies(conn, "b", 10, include_tests=True)
     finally:
         conn.close()
     assert text.splitlines()[0] == (
         "2 modules, 1 internal import edges, 0 cycles"
-        " (edge weight = import statements; left out: 1 test files)"
+        " (edge weight = import statements; left out: 1 test file)"
     )
+    # Asked for, the test's import is back, and with it the cycle the test creates.
+    assert with_tests.splitlines()[:3] == [
+        "2 modules, 2 internal import edges, 1 cycle"
+        " (edge weight = import statements; 1 test file included)",
+        "most imported: a (by 1), b (by 1)",
+        "cycle: a -> b (A.java:2) -> a (BTest.java:2)",
+    ]
+    assert b_with_tests.splitlines()[:3] == [
+        "module b (2 files, tests included)",
+        "imports 1 internal: a 1",
+        "imported by 1: a 1",
+    ]
 
 
 def test_cycle_line_says_when_the_loop_is_one_example():

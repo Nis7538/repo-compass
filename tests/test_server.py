@@ -84,6 +84,11 @@ async def test_each_tool_returns_its_pure_function_output(client, tmp_path):
             {"module": "inventory.models"},
             lambda c: module_dependencies(c, "inventory.models", 10),
         ),
+        (
+            "module_dependencies",
+            {"include_tests": True},
+            lambda c: module_dependencies(c, None, 10, include_tests=True),
+        ),
     ]
     for name, arguments, direct in cases:
         text = await call(client, name, **arguments)

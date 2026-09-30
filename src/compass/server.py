@@ -142,10 +142,17 @@ def build_server(
     @tool(
         "Import graph between packages/modules, and import cycles. No module: overview."
         " module: a name, 'pkg.*' or a prefix: its imports, importers, external deps, cycles."
+        " Test files are left out unless include_tests."
         f" <= {CAPS['module_dependencies']} tokens."
     )
-    def module_dependencies(module: str | None = None, limit: int = DEFAULT_LIMIT) -> str:
+    def module_dependencies(
+        module: str | None = None, limit: int = DEFAULT_LIMIT, include_tests: bool = False
+    ) -> str:
         n, note = bounded("limit", limit)
-        return run("module_dependencies", lambda conn, _: deps_tool(conn, module, n), note)
+        return run(
+            "module_dependencies",
+            lambda conn, _: deps_tool(conn, module, n, include_tests),
+            note,
+        )
 
     return server

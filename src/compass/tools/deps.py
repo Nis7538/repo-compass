@@ -16,10 +16,12 @@ Python imports inside `if TYPE_CHECKING:` are left out too: they never run, and
 counting them reports import cycles that do not exist at runtime (flask's
 flask.app <-> flask.cli went through one).
 
-Test files (tools/rank.is_test_path) are left out of the graph. In Java they
-usually share packages with the code they test, and their imports of fixtures
-and test-only packages would otherwise show up as production dependencies and
-cycles (on apache/commons-lang they joined 16 packages into one cycle).
+Test files (tools/rank.is_test_path) are left out of the graph by default. In
+Java they usually share packages with the code they test, and their imports of
+fixtures and test-only packages would otherwise show up as production
+dependencies and cycles (on apache/commons-lang they joined 16 packages into one
+cycle). include_tests=True puts them back, for questions like "which tests
+import this module?".
 
 Cycles are strongly connected components with more than one module (Tarjan),
 largest first, each shown as one concrete loop through the component. Each step
@@ -53,16 +55,18 @@ class Graph:
     modules: dict[str, int]  # module -> file count
     edges: Counter = field(default_factory=Counter)  # (src, dst) -> import statements
     external: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
-    test_files: int = 0  # left out of the graph
+    test_files: int = 0  # left out of the graph, or included when include_tests
+    include_tests: bool = False
     type_only: int = 0  # Python imports under `if TYPE_CHECKING:`, left out
     # (src, dst) -> one import statement making that edge: 'File.java:12', or
     # 'cli.py:45, inside a function' when every import making it is deferred
     example: dict[tuple[str, str], str] = field(default_factory=dict)
 
 
-def build_graph(conn: sqlite3.Connection) -> Graph:
+def build_graph(conn: sqlite3.Connection, include_tests: bool = False) -> Graph:
     files = conn.execute("SELECT id, path, module FROM files WHERE module != ''").fetchall()
-    kept = {f["id"] for f in files if not is_test_path(f["path"])}
+    tests = {f["id"] for f in files if is_test_path(f["path"])}
+    kept = {f["id"] for f in files if include_tests or f["id"] not in tests}
     modules: Counter = Counter(f["module"] for f in files if f["id"] in kept)
     kinds = ",".join("?" * len(TYPE_KINDS))
     type_module = {
@@ -74,7 +78,7 @@ def build_graph(conn: sqlite3.Connection) -> Graph:
         )
         if r["file_id"] in kept
     }
-    graph = Graph(dict(modules), test_files=len(files) - len(kept))
+    graph = Graph(dict(modules), test_files=len(tests), include_tests=include_tests)
     deferred_at = _function_ranges(conn)
     rows = conn.execute(
         "SELECT i.file_id, i.line, f.path, f.module AS src, f.language, i.module, i.name,"
@@ -135,8 +139,10 @@ def _external_name(language: str, module: str) -> str:
     return ".".join(parts[:1] if language == "python" else parts[:2])
 
 
-def module_dependencies(conn: sqlite3.Connection, module: str | None, limit: int) -> str:
-    graph = build_graph(conn)
+def module_dependencies(
+    conn: sqlite3.Connection, module: str | None, limit: int, include_tests: bool = False
+) -> str:
+    graph = build_graph(conn, include_tests)
     if not graph.modules:
         return "No modules in the index."
     if module is None or not module.strip():
@@ -146,12 +152,18 @@ def module_dependencies(conn: sqlite3.Connection, module: str | None, limit: int
 
 def _overview(graph: Graph, limit: int) -> str:
     cycles = find_cycles(graph)
+    tests = f"{graph.test_files} test file{'s' if graph.test_files != 1 else ''}"
+    left_out = [] if graph.include_tests else [tests]
+    if graph.type_only:
+        left_out.append(f"{graph.type_only} TYPE_CHECKING imports")
+    notes = ["edge weight = import statements"]
+    if graph.include_tests:
+        notes.append(f"{tests} included")
+    if left_out:
+        notes.append("left out: " + ", ".join(left_out))
     head = [
         f"{len(graph.modules)} modules, {len(graph.edges)} internal import edges,"
-        f" {len(cycles)} cycle{'s' if len(cycles) != 1 else ''} (edge weight = import"
-        f" statements; left out: {graph.test_files} test files"
-        + (f", {graph.type_only} TYPE_CHECKING imports" if graph.type_only else "")
-        + ")"
+        f" {len(cycles)} cycle{'s' if len(cycles) != 1 else ''} ({'; '.join(notes)})"
     ]
     importers: dict[str, set[str]] = defaultdict(set)
     for src, dst in graph.edges:
@@ -182,14 +194,17 @@ def _one_module(graph: Graph, spec: str, limit: int) -> str:
         needle = spec.rstrip(".*").lower()
         similar = sorted(m for m in graph.modules if needle in m.lower())[:5]
         hint = f" Similar: {', '.join(similar)}." if similar else ""
+        tests = "" if graph.include_tests else " (test files are left out)"
         return (
-            f'No module "{spec}" in the import graph (test files are left out).{hint}'
+            f'No module "{spec}" in the import graph{tests}.{hint}'
             " Call with no module for an overview."
         )
 
     group = len(members) > 1
     files = sum(graph.modules[m] for m in members)
     file_count = f"{files} file{'s' if files != 1 else ''}"
+    if graph.include_tests:
+        file_count += ", tests included"
     if group:
         base = spec[:-2] if spec.endswith(".*") else spec
         head = [f"module {base}.* ({len(members)} modules, {file_count})"]

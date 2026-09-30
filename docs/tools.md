@@ -161,7 +161,7 @@ java/shop/src/main/java/com/example/shop/model/Order.java (java, 83 lines, modul
 [truncated: 13 more (fields 8, methods 4, constructors 1)] limit=23 shows all
 ```
 
-## module_dependencies(module=None, limit=10)
+## module_dependencies(module=None, limit=10, include_tests=False)
 
 The import graph between modules: Java packages and Python modules. Edge weight is the
 number of import statements. External modules are collapsed (`java.util`, `requests`).
@@ -175,11 +175,12 @@ every member.
 
 Python imports inside `if TYPE_CHECKING:` are left out, because they never run. Counting
 them reports cycles that exist only for type checkers; flask's `flask.app <-> flask.cli`
-went through one. Test files are left out of the graph too, and the header says how many
-of each were left out. Java tests
-usually live in the same packages as the code they test, so their imports would show up
-as production dependencies. On apache/commons-lang they joined test-only packages into
-the main cycle.
+went through one. Test files are left out of the graph too by default, and the header says
+how many of each were left out. Java tests usually live in the same packages as the code
+they test, so their imports would show up as production dependencies. On
+apache/commons-lang they joined test-only packages into the main cycle.
+`include_tests=True` puts test files back, for questions like "which tests import this
+module?". The header then says `N test files included`.
 
 - No `module`: counts, the most imported modules, cycles, and the heaviest edges.
 - `module`: its internal imports, who imports it, its external dependencies, and the cycles
