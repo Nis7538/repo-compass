@@ -6,7 +6,9 @@ text meant for a model to read. The rules below apply to all of them. The reason
 
 - **Locations and signatures first.** Only `get_symbol` returns source code.
 - **Default `limit` is 10.** Any value up to 200 is accepted. Values out of range are
-  clamped, not rejected.
+  clamped, not rejected, and the answer's first line says so:
+  `[limit=500 clamped to 200, the maximum]`. Without that line, an agent that asked for 500
+  results could take a cut answer for a complete one.
 - **Ranked, then cut.** Results are sorted best first. When some are dropped, the last line
   says so: `[truncated: N more (...)] limit=M shows all`. If the token cap cut the list
   before the limit did, the hint says `output cap reached; narrow the query`.
@@ -58,7 +60,7 @@ source roots (package dir = root + package path): java/shop/src/main/java/, pyth
   (no package)  python/scripts/  1 file 6 lines
 ```
 
-## search_symbols(query, kind=None, limit=10)
+## search_symbols(query, kind=None, path=None, limit=10)
 
 `query` is a simple name (`save`), a dotted name (`Order.add`) or words (`get user` finds
 `get_user_by_id`). `kind` is one of class, interface, enum, record, annotation, method,
@@ -80,6 +82,32 @@ services.py
   27 method StockService.save  def save(self)
 utils.py
   4 function save  def save(obj)
+```
+
+`path` limits the search to part of the repo, matched on whole segments:
+- with a `/` or a `.java`/`.py` ending, it is a directory or file anywhere in the tree:
+  `lang3/builder`, `model/Order.java`, `inventory/models` (finds `inventory/models.py`).
+  A trailing `/` forces this reading (`scripts/`).
+- otherwise it is a package or module name, or a dotted piece of one: `builder` finds
+  `org.apache.commons.lang3.builder` and its subpackages; `com.x.model`, `inventory.models`.
+
+With `path` and an empty `query`, the tool lists what that part of the repo defines. It uses
+the exact-tier ranking (production first, types, then callables, then fields), so
+`search_symbols("", kind="class", path="builder")` answers "what are the main classes of
+this package" without reading any file. The header counts every kind, so a cut list still
+shows the whole:
+
+```
+39 symbols under model (5 files): class 3, interface 1, enum 2, record 1, annotation 1, method 12, constructor 5, field 14
+paths under java/shop/src/main/java/com/example/shop/model/
+Audited.java
+  6 annotation Audited  public @interface Audited
+Item.java
+  3 record Item  public record Item(String sku, double price)
+Order.java
+  9 class Order  public class Order implements Priced
+  62 class Order.Line  public static class Line
+[truncated: 35 more (fields 14, methods 12, constructors 5, enums 2, classes 1, interfaces 1)] limit=39 shows all
 ```
 
 ## get_symbol(symbol, max_lines=60)
@@ -159,7 +187,7 @@ java/shop/src/main/java/com/example/shop/model/Order.java (java, 83 lines, modul
 [truncated: 13 more (fields 8, methods 4, constructors 1)] limit=23 shows all
 ```
 
-## module_dependencies(module=None, limit=10)
+## module_dependencies(module=None, limit=10, include_tests=False)
 
 The import graph between modules: Java packages and Python modules. Edge weight is the
 number of import statements. External modules are collapsed (`java.util`, `requests`).
@@ -173,11 +201,12 @@ every member.
 
 Python imports inside `if TYPE_CHECKING:` are left out, because they never run. Counting
 them reports cycles that exist only for type checkers; flask's `flask.app <-> flask.cli`
-went through one. Test files are left out of the graph too, and the header says how many
-of each were left out. Java tests
-usually live in the same packages as the code they test, so their imports would show up
-as production dependencies. On apache/commons-lang they joined test-only packages into
-the main cycle.
+went through one. Test files are left out of the graph too by default, and the header says
+how many of each were left out. Java tests usually live in the same packages as the code
+they test, so their imports would show up as production dependencies. On
+apache/commons-lang they joined test-only packages into the main cycle.
+`include_tests=True` puts test files back, for questions like "which tests import this
+module?". The header then says `N test files included`.
 
 - No `module`: counts, the most imported modules, cycles, and the heaviest edges.
 - `module`: its internal imports, who imports it, its external dependencies, and the cycles

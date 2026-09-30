@@ -20,6 +20,10 @@ def is_test_path(path: str) -> bool:
     return any(d in _TEST_DIRS for d in dirs) or bool(_TEST_FILE.match(name))
 
 
+def kind_plural(kind: str) -> str:
+    return "classes" if kind == "class" else kind + "s"
+
+
 def kind_rank(kind: str) -> int:
     """Lower is shown first: types, then callables, then fields."""
     if kind in TYPE_KINDS:

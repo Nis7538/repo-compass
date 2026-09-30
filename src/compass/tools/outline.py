@@ -12,11 +12,9 @@ from collections import Counter
 
 from compass.store.queries import SymbolRow, file_symbols
 from compass.tools.caps import CAPS, MAX_LIMIT
-from compass.tools.rank import SIGNATURE_WIDTH, kind_rank
+from compass.tools.rank import SIGNATURE_WIDTH, kind_plural, kind_rank
 from compass.tools.render import clip, fit_lines, more_hint, truncated
 from compass.tools.target import resolve_file
-
-_PLURAL = {"class": "classes"}
 
 
 def file_outline(conn: sqlite3.Connection, path: str, limit: int) -> str:
@@ -60,7 +58,7 @@ def member_outline(
 
     dropped = [s for s, _ in ranked[fitted:]]
     if dropped:
-        counts = Counter(_PLURAL.get(s.kind, s.kind + "s") for s in dropped)
+        counts = Counter(kind_plural(s.kind) for s in dropped)
         detail = ", ".join(f"{kind} {n}" for kind, n in counts.most_common())
         hint = more_hint(len(ranked), fitted, limit, MAX_LIMIT)
         lines.append(truncated(len(dropped), detail, hint))

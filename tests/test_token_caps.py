@@ -52,6 +52,7 @@ CALLS = [
     ("repo_summary", {}, True),
     ("search_symbols", {"query": "number"}, True),
     ("search_symbols", {"query": "process"}, False),
+    ("search_symbols", {"query": "", "path": "org/example"}, True),
     ("get_symbol", {"symbol": "Big.huge"}, True),
     ("get_symbol", {"symbol": "org.example.deeply.nested.core.Big"}, True),
     ("find_references", {"symbol": "Hub.process"}, True),
@@ -61,27 +62,33 @@ CALLS = [
 ]
 
 
-def _with_max(tool: str, arguments: dict) -> dict:
+def _with_limit(tool: str, arguments: dict, mode: str) -> dict:
+    """The maximum limit, or one far above it, so the server adds its clamp note too."""
     key = "max_lines" if tool == "get_symbol" else "limit"
-    return {**arguments, key: MAX_BODY_LINES if tool == "get_symbol" else MAX_LIMIT}
+    top = MAX_BODY_LINES if tool == "get_symbol" else MAX_LIMIT
+    return {**arguments, key: top if mode == "max" else 10**40}
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("at_max", [False, True], ids=["default-limit", "max-limit"])
-async def test_every_response_fits_its_cap(stress_db, at_max):
+@pytest.mark.parametrize("mode", ["default", "max", "clamped"])
+async def test_every_response_fits_its_cap(stress_db, mode):
     root, db = stress_db
     async with Client(build_server(root, db, StaleManager()), mode="legacy") as client:
         for tool, arguments, too_big in CALLS:
-            if at_max:
-                arguments = _with_max(tool, arguments)
+            if mode != "default":
+                arguments = _with_limit(tool, arguments, mode)
             result = await client.call_tool(tool, arguments)
             assert not result.is_error, (tool, result.content)
             text = result.content[0].text
             tokens = estimate_tokens(text)
             assert tokens <= CAPS[tool], f"{tool} {arguments}: {tokens} > {CAPS[tool]}"
             assert text.startswith(STATUS)
+            if mode == "clamped":
+                assert text.split("\n")[1].endswith("the maximum]"), (tool, text[:300])
             if too_big:
                 assert "[truncated: " in text, f"{tool} {arguments}: cut without a marker"
+                # The renderer's own marker, not the last-resort guard in enforce_cap.
+                assert "[truncated: output cap reached]" not in text, (tool, arguments)
 
 
 @pytest.mark.anyio

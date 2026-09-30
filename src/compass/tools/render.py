@@ -6,8 +6,9 @@ make sure a response never exceeds its cap (tools/caps.py):
 
 - results arrive already ranked; `fit_*` keeps the longest ranked prefix that
   fits, so what gets cut is always the lowest-ranked tail;
-- room is always reserved for a `[truncated: N more]` marker and for the
-  server's one-line index status, so neither can push a response over its cap;
+- room is always reserved for a `[truncated: N more]` marker, for the
+  server's one-line index status and for its note about a clamped limit, so none
+  of them can push a response over its cap;
 - `enforce_cap` is a last-resort guard applied to every finished response.
 
 Tokens are estimated as ceil(chars / 3). There is no offline Claude tokenizer;
@@ -19,11 +20,13 @@ from dataclasses import dataclass
 
 CHARS_PER_TOKEN = 3
 
-# Characters kept free in every response: ~300 for the truncation marker and
-# ~200 for the index status line the server may prepend.
+# Characters kept free in every response: ~300 for the truncation marker, ~200
+# for the index status line the server may prepend, and ~60 for its note that a
+# limit was clamped.
 MARKER_WIDTH = 300
 STATUS_WIDTH = 200
-HEADROOM = MARKER_WIDTH + STATUS_WIDTH
+NOTE_WIDTH = 60
+HEADROOM = MARKER_WIDTH + STATUS_WIDTH + NOTE_WIDTH
 
 ELLIPSIS = "…"
 

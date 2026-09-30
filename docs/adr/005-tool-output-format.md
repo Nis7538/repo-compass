@@ -60,8 +60,9 @@ It only changes the order and never hides anything.
 ### Hard caps, enforced by a test
 Each tool has a cap in `tools/caps.py`: repo_summary 600, search_symbols 1,500, get_symbol
 2,000, find_references 2,000, file_outline 1,500, module_dependencies 1,200 tokens. The
-renderer counts as it adds lines. It keeps 300 characters free for the truncation marker
-and 200 for the index status line (ADR-006), so neither can push an answer over its cap.
+renderer counts as it adds lines. It keeps 300 characters free for the truncation marker,
+200 for the index status line (ADR-006) and 60 for the note that says a limit was clamped,
+so none of them can push an answer over its cap.
 The server applies `enforce_cap` to every answer as a last guard. `tests/test_token_caps.py`
 calls every tool on a generated repo built to overflow them (a method with 500+ callers, a
 300-member class, a 400-line method, a 1,000-character line, a 60-package import cycle), at

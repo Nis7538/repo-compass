@@ -42,6 +42,76 @@ def test_search_rejects_unknown_kind_and_empty_query(fx_conn):
     assert search_symbols(fx_conn, "zzzz", None, 10) == 'No symbols match "zzzz".'
 
 
+def test_list_a_package_types_first_with_counts_that_survive_the_cut(fx_conn):
+    assert search_symbols(fx_conn, "", None, 4, path="model").splitlines() == [
+        "39 symbols under model (5 files): class 3, interface 1, enum 2, record 1,"
+        " annotation 1, method 12, constructor 5, field 14",
+        "paths under java/shop/src/main/java/com/example/shop/model/",
+        "Audited.java",
+        "  6 annotation Audited  public @interface Audited",
+        "Item.java",
+        "  3 record Item  public record Item(String sku, double price)",
+        "Order.java",
+        "  9 class Order  public class Order implements Priced",
+        "  62 class Order.Line  public static class Line",
+        "[truncated: 35 more (fields 14, methods 12, constructors 5, enums 2, classes 1,"
+        " interfaces 1)] limit=39 shows all",
+    ]
+
+
+def test_list_main_classes_of_a_package(fx_conn):
+    # The M2 end-to-end question that had no answer: "main classes of package X".
+    lines = search_symbols(fx_conn, "", "class", 10, path="com.example.shop.service")
+    assert lines.splitlines() == [
+        "2 symbols kind=class under com.example.shop.service (2 files)",
+        "paths under java/shop/src/main/java/com/example/shop/service/",
+        "BaseService.java",
+        "  3 class BaseService  public abstract class BaseService",
+        "OrderService.java",
+        "  10 class OrderService  public class OrderService extends BaseService",
+    ]
+
+
+def test_path_scope_matches_whole_segments_directories_and_files(fx_conn):
+    def header(path, query="save"):
+        return search_symbols(fx_conn, query, None, 10, path=path).splitlines()[0]
+
+    # A file by suffix, with or without its extension, or by module name.
+    for path in ("inventory/models.py", "inventory/models", "inventory.models", "models.py"):
+        assert header(path) == f'2 symbols match "save" under {path} (exact 2)', path
+    # A directory, with or without the trailing slash, and the whole path.
+    assert header("src/inventory/") == '4 symbols match "save" under src/inventory (exact 4)'
+    assert header("python/src/inventory/utils.py").startswith("1 symbol matches")
+    # Segments are whole: "odels" is not "models", "inv_ntory" is not a LIKE pattern.
+    for path in ("odels", "odels.py", "inv_ntory", "inventory/model"):
+        assert header(path).startswith(f'No indexed file under "{path}"'), path
+
+
+def test_trailing_slash_reads_a_word_as_a_directory(fx_conn):
+    # "scripts" is a directory but no module has that name (scripts/seed.py is "seed").
+    assert search_symbols(fx_conn, "", None, 10, path="scripts").startswith(
+        'No indexed file under "scripts".'
+    )
+    assert search_symbols(fx_conn, "", None, 10, path="scripts/") == (
+        "No symbols under scripts (1 file)."
+    )
+
+
+def test_unknown_scope_suggests_close_names(fx_conn):
+    assert search_symbols(fx_conn, "", None, 10, path="modle") == (
+        'No indexed file under "modle". Similar names: model. Pass a directory ("model/"),'
+        ' a file ("Order.java") or a package or module ("com.x.model", "inventory.models").'
+    )
+
+
+def test_query_with_scope_keeps_word_matches_inside_it(fx_conn):
+    assert search_symbols(fx_conn, "total", None, 10, path="service").splitlines() == [
+        '1 symbol matches "total" under service (exact 0, word match 1)',
+        "java/shop/src/main/java/com/example/shop/service/OrderService.java",
+        "  33 method OrderService.totals  public List<Double> totals(List<Order> orders)",
+    ]
+
+
 def test_get_symbol_method_body_is_dedented(fx_conn):
     assert get_symbol(fx_conn, "Order.addAll", 60).splitlines() == [
         f"method Order.addAll @ {MODEL}Order.java:34-39",

@@ -127,6 +127,46 @@ def ref_row(r: sqlite3.Row) -> RefRow:
     )
 
 
+@dataclass(frozen=True)
+class Scope:
+    """A set of indexed files, as an SQL condition on the files table (alias f).
+
+    Named by a path or by a package/module, always matched on whole segments:
+      path    contains '/' or ends in .java/.py: a directory or a file, anywhere in
+              the tree ('lang3/builder', 'model/Order.java', 'inventory/models' also
+              finds inventory/models.py). A trailing '/' forces this reading.
+      module  anything else: a dotted fragment of the Java package or Python module
+              ('builder' finds org.apache.commons.lang3.builder and its subpackages;
+              'com.x.model', 'inventory.models'; a trailing '.*' is allowed).
+    """
+
+    spec: str
+    sql: str
+    args: tuple[str, ...]
+
+
+SOURCE_SUFFIXES = (".java", ".py")
+
+
+def scope_of(spec: str) -> Scope:
+    spec = spec.strip().replace("\\", "/")
+    if "/" in spec or spec.endswith(SOURCE_SUFFIXES):
+        path = spec.strip("/")
+        e = _escape_like(path)
+        files = [e] if path.endswith(SOURCE_SUFFIXES) else [e + s for s in SOURCE_SUFFIXES]
+        clauses = ["f.path LIKE ? ESCAPE '\\'", "f.path LIKE ? ESCAPE '\\'"]  # directory
+        args = [e + "/%", "%/" + e + "/%"]
+        for name in files:  # file
+            clauses += ["f.path LIKE ? ESCAPE '\\'", "f.path LIKE ? ESCAPE '\\'"]
+            args += [name, "%/" + name]
+        return Scope(path, "(" + " OR ".join(clauses) + ")", tuple(args))
+    module = spec.removesuffix(".*").strip(".")
+    e = _escape_like(module)
+    patterns = [e, e + ".%", "%." + e, "%." + e + ".%"]
+    sql = "(" + " OR ".join(["f.module LIKE ? ESCAPE '\\'"] * 4) + ")"
+    return Scope(module, sql, tuple(patterns))
+
+
 def get_symbol(conn: sqlite3.Connection, symbol_id: int) -> SymbolRow | None:
     row = conn.execute(SYMBOL_SELECT + " WHERE s.id = ?", (symbol_id,)).fetchone()
     return symbol_row(row) if row else None
@@ -146,11 +186,11 @@ def find_symbols(
 
 
 def exact_symbols(
-    conn: sqlite3.Connection, query: str, kind: str | None = None
+    conn: sqlite3.Connection, query: str, kind: str | None = None, scope: Scope | None = None
 ) -> list[SymbolRow]:
     """Symbols whose qualified name is query or ends in '.query'; for a plain name, whose
     simple name is query. Ordered by location."""
-    kind_sql, kind_args = (" AND s.kind = ?", [kind]) if kind else ("", [])
+    kind_sql, kind_args = _filters(kind, scope)
     if "." in query:
         suffix = "%." + _escape_like(query)
         rows = conn.execute(
@@ -168,13 +208,17 @@ def exact_symbols(
 
 
 def fts_symbols(
-    conn: sqlite3.Connection, query: str, kind: str | None = None, limit: int = 200
+    conn: sqlite3.Connection,
+    query: str,
+    kind: str | None = None,
+    limit: int = 200,
+    scope: Scope | None = None,
 ) -> list[SymbolRow]:
     """Full-text prefix search over the words of the last dotted part of query, best first."""
     words = split_words(query.rsplit(".", 1)[-1])
     if not words:
         return []
-    kind_sql, kind_args = (" AND s.kind = ?", [kind]) if kind else ("", [])
+    kind_sql, kind_args = _filters(kind, scope)
     match = " ".join(f'"{w}"*' for w in words.split())
     rows = conn.execute(
         SYMBOL_SELECT
@@ -182,6 +226,24 @@ def fts_symbols(
         + kind_sql
         + " ORDER BY bm25(symbols_fts), length(s.name), s.id LIMIT ?",
         [match, *kind_args, limit],
+    ).fetchall()
+    return [symbol_row(r) for r in rows]
+
+
+def scope_files(conn: sqlite3.Connection, scope: Scope) -> list[FileRow]:
+    rows = conn.execute(
+        f"SELECT * FROM files f WHERE {scope.sql} ORDER BY f.path", scope.args
+    ).fetchall()
+    return [file_row(r) for r in rows]
+
+
+def scope_symbols(
+    conn: sqlite3.Connection, scope: Scope, kind: str | None = None
+) -> list[SymbolRow]:
+    """Every symbol defined in the scope's files, ordered by location."""
+    kind_sql, kind_args = (" AND s.kind = ?", [kind]) if kind else ("", [])
+    rows = conn.execute(
+        SYMBOL_SELECT + f" WHERE {scope.sql}" + kind_sql + _ORDER, [*scope.args, *kind_args]
     ).fetchall()
     return [symbol_row(r) for r in rows]
 
@@ -206,6 +268,16 @@ def file_symbols(conn: sqlite3.Connection, file_id: int) -> list[SymbolRow]:
         SYMBOL_SELECT + " WHERE s.file_id = ? ORDER BY s.start_line, s.id", (file_id,)
     ).fetchall()
     return [symbol_row(r) for r in rows]
+
+
+def _filters(kind: str | None, scope: Scope | None) -> tuple[str, list]:
+    """' AND ...' conditions (and their arguments) for an optional kind and scope."""
+    sql, args = "", []
+    if kind:
+        sql, args = " AND s.kind = ?", [kind]
+    if scope is not None:
+        sql, args = sql + f" AND {scope.sql}", [*args, *scope.args]
+    return sql, args
 
 
 def _escape_like(text: str) -> str:
