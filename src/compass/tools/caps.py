@@ -23,7 +23,7 @@ STATUS_CAP = 200
 
 # All tool names, descriptions and input schemas together. The client sends these to
 # the model on every turn, so they cost tokens even when no tool is called.
-TOOLS_LIST_CAP = 1200
+TOOLS_LIST_CAP = 1500
 
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 200

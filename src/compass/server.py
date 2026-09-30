@@ -25,6 +25,8 @@ from compass.paths import default_db_path
 from compass.store.db import open_index
 from compass.tools.caps import CAPS, DEFAULT_BODY_LINES, DEFAULT_LIMIT, MAX_BODY_LINES, MAX_LIMIT
 from compass.tools.deps import module_dependencies as deps_tool
+from compass.tools.hotspots import hotspots as hotspots_tool
+from compass.tools.impact import diff_impact as impact_tool
 from compass.tools.outline import file_outline as outline_tool
 from compass.tools.references import find_references as refs_tool
 from compass.tools.render import NOTE_WIDTH, clip, enforce_cap
@@ -37,8 +39,9 @@ INSTRUCTIONS = (
     "Answers are compact text, ranked best first and capped; a '[truncated: N more]' line "
     "says what was cut (raise limit, max 200). Symbols are named 'Class.method', a "
     "qualified name, or path:line. Paths may be any unique suffix. References are "
-    "name-based (no type inference) and carry a confidence tier. The index refreshes "
-    "itself; an '[index: ...]' line appears only when it is building or may be stale."
+    "name-based (no type inference) and carry a confidence tier. diff_impact and "
+    "hotspots also read git history. The index refreshes itself; an '[index: ...]' line "
+    "appears only when it is building or may be stale."
 )
 
 READ_ONLY = ToolAnnotations(read_only_hint=True)
@@ -158,5 +161,27 @@ def build_server(
             lambda conn, _: deps_tool(conn, module, n, include_tests),
             note,
         )
+
+    @tool(
+        "What a change touches: symbols changed between base and head (removed, signature,"
+        " body, added), their callers outside the diff by tier, dangling uses of removed"
+        " ones, importers. Compares the merge base, like a PR; head: a ref, default the"
+        " working tree. Ranked: removed/signature changes with callers outside the diff"
+        f" first. <= {CAPS['diff_impact']} tokens."
+    )
+    def diff_impact(base: str, head: str | None = None, limit: int = DEFAULT_LIMIT) -> str:
+        n, note = bounded("limit", limit)
+        return run("diff_impact", lambda conn, _: impact_tool(conn, base, head, n), note)
+
+    @tool(
+        "Files that change often and hold much code: commits x lines inside methods, per"
+        " file, renames followed. since: a ref or a date ('6 months ago'), default 1 year."
+        f" Test files left out unless include_tests. <= {CAPS['hotspots']} tokens."
+    )
+    def hotspots(
+        since: str | None = None, limit: int = DEFAULT_LIMIT, include_tests: bool = False
+    ) -> str:
+        n, note = bounded("limit", limit)
+        return run("hotspots", lambda conn, _: hotspots_tool(conn, since, n, include_tests), note)
 
     return server
