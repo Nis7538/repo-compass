@@ -20,7 +20,12 @@ fast, and honest about how sure it is.
 |------|---------|----------|
 | exact | Binding is certain from syntax | `self.validate()` inside `Item`; `this.audit(x)`; `Money.round(x)` / `m.Item.parse()` where the receiver names an imported class or module; `persist()` after `from m import store as persist`; `round(x)` after `import static ...Money.round`; `new Order.Line(...)` where `Order` is visible |
 | likely | Target's class/module is visible from the calling file, but the receiver is an arbitrary expression, or the target is one inheritance hop up (matched by base-class *name*) | `order.add(item)` where `Order` is imported; `super().save()`; unqualified `log(...)` inherited from `BaseService` |
-| possible | Only the name matches | a method named `total` in a class the calling file never imports |
+| possible | Only the name matches; or a Java **static** method called on an arbitrary expression (added in M3) | a method named `total` in a class the calling file never imports; `lookup.get(k)` for static `JavaVersion.get(String)` |
+
+The static-method rule came from the M3 end-to-end run (docs/e2e-m3.md). On commons-lang,
+`diff_impact` ranked a change to the static `JavaVersion.get` first, with 66 `likely`
+callers outside the diff. All but two were `map.get(...)`-style calls. Java code calls a
+static method through its class; calling it through an instance is legal but rare.
 
 3. For each call site only the **best non-empty tier** is kept. So if one candidate is
    exact, weaker candidates are dropped. `find_references(X)` returns the call sites whose

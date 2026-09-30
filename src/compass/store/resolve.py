@@ -314,6 +314,11 @@ class Resolver:
             # Written like a type name (Math, java.util.Collections) but not a type we
             # indexed: a JDK/library class, so it cannot be one of our methods.
             return None
+        if _is_static(cand):
+            # A static method is called through its class. Called on some other
+            # expression (`map.get(k)` vs static `JavaVersion.get(s)`), the name match
+            # is almost always a different method; legal Java, but rare.
+            return POSSIBLE
         return LIKELY if self._java_visible(ref, enclosing, owner) else POSSIBLE
 
     def _java_new_tier(self, ref, cand, enclosing) -> str | None:
@@ -474,6 +479,11 @@ class Resolver:
             if symbol.kind in TYPE_KINDS:
                 classes.append(symbol)
         return classes
+
+
+def _is_static(symbol: SymbolRow) -> bool:
+    """Java: 'static' among the modifiers, i.e. the words before the parameter list."""
+    return "static" in symbol.signature.split("(", 1)[0].split()
 
 
 def _arity_fits(arg_count: int | None, cand: SymbolRow) -> bool:

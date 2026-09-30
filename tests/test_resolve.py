@@ -256,3 +256,37 @@ def test_find_symbols_falls_back_to_word_prefix_search(conn):
     assert find_symbols(conn, "stockServ")[0].name == "StockService"
     assert find_symbols(conn, "stock")[0].name == "StockService"  # best-ranked first
     assert find_symbols(conn, "zzz") == []
+
+
+def test_static_method_called_on_an_expression_is_only_possible(tmp_path):
+    # `lookup.get(key)` is Map.get far more often than a static Versions.get called
+    # through an instance; the call through the class stays exact.
+    pkg = tmp_path / "p"
+    pkg.mkdir()
+    (pkg / "Versions.java").write_text(
+        "package p;\n\nclass Versions {\n    static Versions get(String s) { return null; }\n"
+        "    Versions next() { return null; }\n}\n"
+    )
+    (pkg / "Use.java").write_text(
+        "package p;\n\nimport java.util.Map;\n\nclass Use {\n"
+        "    Object f(Map<String, Object> lookup, Versions v) {\n"
+        '        Versions.get("1");\n        v.next();\n        return lookup.get("k");\n'
+        "    }\n}\n"
+    )
+    index_repo(tmp_path, tmp_path / "i.db")
+    conn = open_index(tmp_path / "i.db")
+    try:
+        resolver = Resolver(conn)
+        tiers = {
+            (ref.receiver, ref.name): {r.confidence for r in resolver.resolve_ref(ref)}
+            for ref in (
+                ref_row(r) for r in conn.execute(REF_SELECT + " WHERE f.path = 'p/Use.java'")
+            )
+        }
+    finally:
+        conn.close()
+    assert tiers == {
+        ("Versions", "get"): {"exact"},
+        ("lookup", "get"): {"possible"},
+        ("v", "next"): {"likely"},  # instance methods keep the likely tier
+    }
