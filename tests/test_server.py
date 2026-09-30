@@ -101,12 +101,30 @@ async def test_repo_summary_reports_fresh_index(client):
 
 
 @pytest.mark.anyio
-async def test_limits_are_clamped_not_rejected(client):
-    assert (await call(client, "search_symbols", query="save", limit=0)).endswith(
-        "[truncated: 3 more] limit=4 shows all"
-    )
-    text = await call(client, "search_symbols", query="save", limit=10_000)
-    assert "truncated" not in text
+async def test_limits_are_clamped_not_rejected_and_the_answer_says_so(client):
+    low = (await call(client, "search_symbols", query="save", limit=0)).splitlines()
+    assert low[0] == "[limit=0 clamped to 1, the minimum]"
+    assert low[-1] == "[truncated: 3 more] limit=4 shows all"
+    high = await call(client, "search_symbols", query="save", limit=10_000)
+    assert high.splitlines()[0] == "[limit=10000 clamped to 200, the maximum]"
+    assert "truncated" not in high
+    body = await call(client, "get_symbol", symbol="Order.addAll", max_lines=-5)
+    assert body.startswith("[max_lines=-5 clamped to 1, the minimum]\nmethod Order.addAll")
+
+
+@pytest.mark.anyio
+async def test_in_range_limits_add_no_note(client):
+    assert (await call(client, "search_symbols", query="save", limit=200)).startswith("4 symbols")
+    assert (await call(client, "search_symbols", query="save", limit=1)).startswith("4 symbols")
+
+
+def test_clamp_note_fits_its_reserved_width():
+    from compass.server import bounded
+    from compass.tools.render import NOTE_WIDTH
+
+    value, note = bounded("max_lines", 10**40, 400)
+    assert value == 400
+    assert len(note) <= NOTE_WIDTH
 
 
 @pytest.mark.anyio

@@ -6,7 +6,9 @@ text meant for a model to read. The rules below apply to all of them. The reason
 
 - **Locations and signatures first.** Only `get_symbol` returns source code.
 - **Default `limit` is 10.** Any value up to 200 is accepted. Values out of range are
-  clamped, not rejected.
+  clamped, not rejected, and the answer's first line says so:
+  `[limit=500 clamped to 200, the maximum]`. Without that line, an agent that asked for 500
+  results could take a cut answer for a complete one.
 - **Ranked, then cut.** Results are sorted best first. When some are dropped, the last line
   says so: `[truncated: N more (...)] limit=M shows all`. If the token cap cut the list
   before the limit did, the hint says `output cap reached; narrow the query`.

@@ -4,7 +4,8 @@ The logic lives in compass.tools (pure functions over an index connection) and
 compass.index_manager (freshness). Each tool call:
   1. asks the IndexManager for a fresh index (bounded wait, ADR-006);
   2. opens its own SQLite connection (tools run in worker threads);
-  3. runs the tool function, prepends the index status line if there is one;
+  3. runs the tool function, then puts the index status line (if any) and a note
+     about a clamped limit (if any) in front of the answer;
   4. applies the tool's hard token cap as a last guard (tools/caps.py).
 
 Tools are registered with structured_output=False. In mcp 2.x a tool returning
@@ -26,7 +27,7 @@ from compass.tools.caps import CAPS, DEFAULT_BODY_LINES, DEFAULT_LIMIT, MAX_BODY
 from compass.tools.deps import module_dependencies as deps_tool
 from compass.tools.outline import file_outline as outline_tool
 from compass.tools.references import find_references as refs_tool
-from compass.tools.render import enforce_cap
+from compass.tools.render import NOTE_WIDTH, clip, enforce_cap
 from compass.tools.summary import repo_summary as summary_tool
 from compass.tools.symbols import get_symbol as get_symbol_tool
 from compass.tools.symbols import search_symbols as search_tool
@@ -43,10 +44,19 @@ INSTRUCTIONS = (
 READ_ONLY = ToolAnnotations(read_only_hint=True)
 
 
-def bounded(value: int, high: int = MAX_LIMIT) -> int:
-    """Clamp a limit into 1..high. Out-of-range values are clamped, not rejected:
-    the answer is still useful, and the caps bound the size either way."""
-    return max(1, min(value, high))
+def bounded(name: str, value: int, high: int = MAX_LIMIT) -> tuple[int, str | None]:
+    """Clamp a limit into 1..high, and say so when it had to.
+
+    Out-of-range values are clamped, not rejected: the answer is still useful, and
+    the caps bound the size either way. The note tells the agent it did not get
+    what it asked for, so a short answer is not taken for a complete one.
+    """
+    clamped = max(1, min(value, high))
+    if clamped == value:
+        return value, None
+    bound = "maximum" if clamped == high else "minimum"
+    asked = clip(str(value), 12)  # an absurd value must not crowd out the useful part
+    return clamped, clip(f"[{name}={asked} clamped to {clamped}, the {bound}]", NOTE_WIDTH)
 
 
 def build_server(
@@ -58,7 +68,7 @@ def build_server(
     manager.start()
     server = MCPServer("repo-compass", version=__version__, instructions=INSTRUCTIONS)
 
-    def run(tool: str, fn: Callable[..., str]) -> str:
+    def run(tool: str, fn: Callable[..., str], note: str | None = None) -> str:
         freshness = manager.ensure_fresh()
         if not freshness.ready:
             return freshness.status or "[index: not ready]"
@@ -67,6 +77,8 @@ def build_server(
             text = fn(conn, freshness)
         finally:
             conn.close()
+        if note:
+            text = note + "\n" + text
         if freshness.status:
             text = freshness.status + "\n" + text
         return enforce_cap(text, CAPS[tool])
@@ -79,10 +91,12 @@ def build_server(
         f" <= {CAPS['repo_summary']} tokens."
     )
     def repo_summary(limit: int = DEFAULT_LIMIT) -> str:
-        def fn(conn, freshness: Freshness) -> str:
-            return summary_tool(conn, freshness.summary, bounded(limit))
+        n, note = bounded("limit", limit)
 
-        return run("repo_summary", fn)
+        def fn(conn, freshness: Freshness) -> str:
+            return summary_tool(conn, freshness.summary, n)
+
+        return run("repo_summary", fn, note)
 
     @tool(
         "Find symbols by name: 'save', 'Order.add', or words ('get user' finds"
@@ -91,9 +105,8 @@ def build_server(
         f"method|constructor|function|field. <= {CAPS['search_symbols']} tokens."
     )
     def search_symbols(query: str, kind: str | None = None, limit: int = DEFAULT_LIMIT) -> str:
-        return run(
-            "search_symbols", lambda conn, _: search_tool(conn, query, kind, bounded(limit))
-        )
+        n, note = bounded("limit", limit)
+        return run("search_symbols", lambda conn, _: search_tool(conn, query, kind, n), note)
 
     @tool(
         "Source of one symbol: body for methods/functions, member list for types, plus doc."
@@ -104,10 +117,8 @@ def build_server(
         symbol: str,
         max_lines: int = DEFAULT_BODY_LINES,
     ) -> str:
-        return run(
-            "get_symbol",
-            lambda conn, _: get_symbol_tool(conn, symbol, bounded(max_lines, MAX_BODY_LINES)),
-        )
+        n, note = bounded("max_lines", max_lines, MAX_BODY_LINES)
+        return run("get_symbol", lambda conn, _: get_symbol_tool(conn, symbol, n), note)
 
     @tool(
         "Call sites of a symbol, grouped by file, with calling symbol and source line."
@@ -116,7 +127,8 @@ def build_server(
         f" <= {CAPS['find_references']} tokens."
     )
     def find_references(symbol: str, limit: int = DEFAULT_LIMIT) -> str:
-        return run("find_references", lambda conn, _: refs_tool(conn, symbol, bounded(limit)))
+        n, note = bounded("limit", limit)
+        return run("find_references", lambda conn, _: refs_tool(conn, symbol, n), note)
 
     @tool(
         "Symbols a file defines, with line ranges and signatures, without reading it."
@@ -124,7 +136,8 @@ def build_server(
         f" <= {CAPS['file_outline']} tokens."
     )
     def file_outline(path: str, limit: int = DEFAULT_LIMIT) -> str:
-        return run("file_outline", lambda conn, _: outline_tool(conn, path, bounded(limit)))
+        n, note = bounded("limit", limit)
+        return run("file_outline", lambda conn, _: outline_tool(conn, path, n), note)
 
     @tool(
         "Import graph between packages/modules, and import cycles. No module: overview."
@@ -132,6 +145,7 @@ def build_server(
         f" <= {CAPS['module_dependencies']} tokens."
     )
     def module_dependencies(module: str | None = None, limit: int = DEFAULT_LIMIT) -> str:
-        return run("module_dependencies", lambda conn, _: deps_tool(conn, module, bounded(limit)))
+        n, note = bounded("limit", limit)
+        return run("module_dependencies", lambda conn, _: deps_tool(conn, module, n), note)
 
     return server
