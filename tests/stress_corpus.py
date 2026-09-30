@@ -5,10 +5,15 @@
 - 60 packages import each other in one long ring (a 60-module cycle) plus
   external imports.
 - Paths are deep, Maven-style, so path handling and prefix factoring are exercised.
+- commit_stress_history makes two commits, the second touching every file: 150 long
+  signatures change, 540 method bodies change, and Hub.process is re-declared, so
+  diff_impact has ~700 changed symbols and hotspots 60+ changed files.
 Everything is written from scratch here; nothing is copied from real code.
 """
 
 from pathlib import Path
+
+from tests.gitrepo import ScriptedRepo
 
 ROOT = "modules/a-rather-long-module-name/src/main/java/org/example/deeply/nested"
 PACKAGES = 60
@@ -86,3 +91,14 @@ def _big_class() -> str:
     lines.append("    }")
     lines.append("}")
     return "\n".join(lines) + "\n"
+
+
+def commit_stress_history(repo: ScriptedRepo) -> None:
+    repo.commit("stress: first", "2026-01-05T10:00:00+00:00")
+    for path in sorted(repo.root.rglob("*.java")):
+        text = path.read_text()
+        text = text.replace("argumentNumber7)", "argumentNumber7, int extra)")  # Big
+        text = text.replace("return a;", "return a + 1;")  # every Caller method
+        text = text.replace("process(int value)", "process(int value, int... more)")  # Hub
+        path.write_text(text)
+    repo.commit("stress: touch everything", "2026-01-12T10:00:00+00:00")

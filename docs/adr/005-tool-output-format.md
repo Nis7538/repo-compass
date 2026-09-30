@@ -59,7 +59,10 @@ It only changes the order and never hides anything.
 
 ### Hard caps, enforced by a test
 Each tool has a cap in `tools/caps.py`: repo_summary 600, search_symbols 1,500, get_symbol
-2,000, find_references 2,000, file_outline 1,500, module_dependencies 1,200 tokens. The
+2,000, find_references 2,000, file_outline 1,500, module_dependencies 1,200 tokens (M3
+added diff_impact 2,000 and hotspots 1,200, see ADR-007). All tool definitions together
+must stay under a tool-list budget, since a client sends them on every turn: 1,200 tokens
+for the six M2 tools, raised to 1,500 in M3 for eight (1,322 measured). The
 renderer counts as it adds lines. It keeps 300 characters free for the truncation marker,
 200 for the index status line (ADR-006) and 60 for the note that says a limit was clamped,
 so none of them can push an answer over its cap.
@@ -76,7 +79,7 @@ roughly 3 to 4 characters per token, so dividing by 3 overestimates, which is th
 direction for a ceiling. This is an estimate, not a measurement. It has not been
 calibrated against the real tokenizer yet: the Claude Code stream reports usage per turn,
 not per tool result, and the optional `count_tokens` calibration script was not written in
-M2. If the estimate turns out to be badly off, the fix is one constant, `CHARS_PER_TOKEN`.
+M2. It exists since M3 (`scripts/calibrate_tokens.py`, manual only) and has not been run yet. If the estimate turns out to be badly off, the fix is one constant, `CHARS_PER_TOKEN`.
 
 ### No numeric symbol ids
 PLAN.md sketched `get_symbol(id | qualified_name)`. Row ids are not stable. Reindexing a

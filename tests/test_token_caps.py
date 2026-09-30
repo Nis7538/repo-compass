@@ -18,7 +18,8 @@ from compass.indexer.pipeline import index_repo
 from compass.server import build_server
 from compass.tools.caps import CAPS, MAX_BODY_LINES, MAX_LIMIT, STATUS_CAP
 from compass.tools.render import STATUS_WIDTH, estimate_tokens
-from tests.stress_corpus import write_stress_repo
+from tests.gitrepo import ScriptedRepo, hide_git_config
+from tests.stress_corpus import commit_stress_history, write_stress_repo
 
 DOCS = Path(__file__).resolve().parent.parent / "docs" / "tools.md"
 STATUS = "[index: refresh running 99s; " + "x" * (STATUS_WIDTH - 31) + "]"
@@ -41,9 +42,12 @@ def anyio_backend():
 
 @pytest.fixture(scope="module")
 def stress_db(tmp_path_factory):
-    root = write_stress_repo(tmp_path_factory.mktemp("stress") / "repo")
-    db = root.parent / "index.db"
-    index_repo(root, db)
+    with pytest.MonkeyPatch.context() as mp:
+        hide_git_config(mp)
+        root = write_stress_repo(tmp_path_factory.mktemp("stress") / "repo")
+        commit_stress_history(ScriptedRepo(root))
+        db = root.parent / "index.db"
+        index_repo(root, db)
     return root, db
 
 
@@ -59,6 +63,10 @@ CALLS = [
     ("file_outline", {"path": "core/Big.java"}, True),
     ("module_dependencies", {}, True),
     ("module_dependencies", {"module": "org.example.deeply.nested.level00"}, False),
+    ("diff_impact", {"base": "HEAD~1", "head": "HEAD"}, True),
+    ("diff_impact", {"base": "HEAD~1"}, True),
+    ("hotspots", {"since": "2000-01-01"}, True),
+    ("hotspots", {"since": "HEAD~1", "include_tests": True}, True),
 ]
 
 
@@ -71,7 +79,8 @@ def _with_limit(tool: str, arguments: dict, mode: str) -> dict:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("mode", ["default", "max", "clamped"])
-async def test_every_response_fits_its_cap(stress_db, mode):
+async def test_every_response_fits_its_cap(stress_db, mode, monkeypatch):
+    hide_git_config(monkeypatch)
     root, db = stress_db
     async with Client(build_server(root, db, StaleManager()), mode="legacy") as client:
         for tool, arguments, too_big in CALLS:
@@ -99,6 +108,9 @@ async def test_error_and_status_only_answers_fit_the_status_cap(stress_db):
             ("get_symbol", {"symbol": "no.such.Thing"}),
             ("file_outline", {"path": "Nope.java"}),
             ("find_references", {"symbol": "zzz"}),
+            ("diff_impact", {"base": "no-such-branch"}),
+            ("diff_impact", {"base": "HEAD", "head": "HEAD"}),
+            ("hotspots", {"since": "2099-01-01"}),
         ]:
             text = (await client.call_tool(tool, arguments)).content[0].text
             assert estimate_tokens(text) <= STATUS_CAP, (tool, text)

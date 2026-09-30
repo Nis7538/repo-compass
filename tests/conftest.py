@@ -4,7 +4,33 @@ import shutil
 
 import pytest
 
+from tests.gitrepo import hide_git_config
 from tests.helpers import FIXTURES
+
+
+@pytest.fixture(autouse=True)
+def isolated_git(monkeypatch):
+    """Keep the machine's git config out of every test: no user or system config file.
+
+    Without this a developer's global settings (autocrlf, a pager, fsmonitor, signing)
+    would change what both the test helpers and the code under test see.
+    """
+    hide_git_config(monkeypatch)
+
+
+@pytest.fixture(scope="session")
+def shop(tmp_path_factory):
+    """tests/shop_history.py built once, feature checked out, and its index. Read-only."""
+    from compass.indexer.pipeline import index_repo
+    from tests.gitrepo import ScriptedRepo
+    from tests.shop_history import shop_history
+
+    with pytest.MonkeyPatch.context() as mp:  # the autouse fixture is per test
+        hide_git_config(mp)
+        tmp = tmp_path_factory.mktemp("shop")
+        repo = shop_history(ScriptedRepo(tmp / "repo"))
+        index_repo(repo.root, tmp / "index.db")
+    return repo, tmp / "index.db"
 
 
 @pytest.fixture

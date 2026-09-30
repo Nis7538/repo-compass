@@ -24,7 +24,7 @@ The full plan is in PLAN.md. Follow it milestone by milestone.
 - GitHub Actions for CI
 
 ## Commands (keep these working; update here if they change)
-- `uv sync` — install
+- `uv sync` — install (`uv sync --extra agent` adds the anthropic SDK, needed only by code that calls the Claude API)
 - `uv run pytest -q` — tests
 - `uv run ruff check . && uv run ruff format --check .` — lint
 - `uv run compass --help` — CLI
@@ -34,6 +34,8 @@ The full plan is in PLAN.md. Follow it milestone by milestone.
 - `claude mcp add repo-compass -- uv run --project <compass checkout> compass serve --repo .` — register with Claude Code
 - `uv run pytest -q -m "not slow"` — tests without the 50k-line benchmark and the stdio subprocess test
 - `uv run python scripts/bench_index.py <path> | --synthetic 50000` — indexing benchmark
+- `uv run python scripts/calibrate_tokens.py [--repo <path>]` — token estimate vs real `count_tokens` (manual only, never in CI; needs `--extra agent` and an API key)
+- `uv run python scripts/e2e_claude.py --repo <path> "question" [--builtin]` — headless Claude Code run with the compass tools (manual only, never in CI; costs API usage)
 
 ## Guardrails
 - Tool outputs returned to agents must be size-capped and truncated with an explicit "truncated, N more" marker. Token efficiency is a core feature.

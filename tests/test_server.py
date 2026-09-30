@@ -16,6 +16,8 @@ from compass.server import INSTRUCTIONS, build_server
 from compass.store.db import open_index
 from compass.tools.caps import TOOLS_LIST_CAP
 from compass.tools.deps import module_dependencies
+from compass.tools.hotspots import hotspots
+from compass.tools.impact import diff_impact
 from compass.tools.outline import file_outline
 from compass.tools.references import find_references
 from compass.tools.render import estimate_tokens
@@ -29,6 +31,8 @@ TOOLS = {
     "find_references",
     "file_outline",
     "module_dependencies",
+    "diff_impact",
+    "hotspots",
 }
 
 
@@ -54,7 +58,7 @@ async def client(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_lists_six_read_only_text_tools_within_budget(client):
+async def test_lists_eight_read_only_text_tools_within_budget(client):
     listed = (await client.list_tools()).tools
     assert {t.name for t in listed} == TOOLS
     for t in listed:
@@ -102,6 +106,35 @@ async def test_each_tool_returns_its_pure_function_output(client, tmp_path):
             assert text == direct(conn), name
         finally:
             conn.close()
+
+
+@pytest.mark.anyio
+async def test_git_tools_return_their_pure_function_output(shop, tmp_path):
+    repo, _ = shop
+    db = tmp_path / "shop.db"
+    cases = [
+        ("diff_impact", {"base": "main"}, lambda c: diff_impact(c, "main", None, 10)),
+        (
+            "diff_impact",
+            {"base": "main~1", "head": "main", "limit": 3},
+            lambda c: diff_impact(c, "main~1", "main", 3),
+        ),
+        ("hotspots", {"since": "2026-01-01"}, lambda c: hotspots(c, "2026-01-01", 10, False)),
+        (
+            "hotspots",
+            {"since": "main", "include_tests": True},
+            lambda c: hotspots(c, "main", 10, True),
+        ),
+    ]
+    async with Client(build_server(repo.root, db), mode="legacy") as c:
+        for name, arguments, direct in cases:
+            text = await call(c, name, **arguments)
+            conn = open_index(db)
+            try:
+                assert text == direct(conn), name
+            finally:
+                conn.close()
+    assert text.startswith("hotspots since main (2026-02-16)")
 
 
 @pytest.mark.anyio

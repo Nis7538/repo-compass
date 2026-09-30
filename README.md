@@ -2,12 +2,12 @@
 
 An MCP server that gives coding agents structural understanding of a codebase — symbols, references, module dependencies, diff impact, hotspots — plus an eval harness that measures whether it actually helps.
 
-> Under construction. See [PLAN.md](PLAN.md) for the roadmap. Done so far: M0 (scaffold), M1 (indexer), M2 (MCP server).
+> Under construction. See [PLAN.md](PLAN.md) for the roadmap. Done so far: M0 (scaffold), M1 (indexer), M2 (MCP server), M3 (git-aware tools).
 
 ## Install
 
 ```bash
-uv sync
+uv sync                 # add --extra agent for the anthropic SDK (API scripts only)
 ```
 
 ## Usage
@@ -44,11 +44,15 @@ claude mcp add repo-compass -- uv run --project /path/to/repo-compass compass se
 the background when it starts and refreshes before every tool call. The first call on a
 large repo may reply "index building, retry" if the build takes more than a few seconds.
 
-Six read-only tools: `repo_summary`, `search_symbols`, `get_symbol`, `find_references`,
-`file_outline`, `module_dependencies`. Answers are compact text, ranked, and capped per
+Eight read-only tools: `repo_summary`, `search_symbols`, `get_symbol`, `find_references`,
+`file_outline`, `module_dependencies`, and two that read git history: `diff_impact` (changed
+symbols between two refs or against the working tree, their callers outside the diff,
+dangling uses of removed ones) and `hotspots` (files ranked by commits x lines inside
+methods). Answers are compact text, ranked, and capped per
 tool with an explicit `[truncated: N more]` line. Formats, ranking rules and token caps:
 [docs/tools.md](docs/tools.md). An end-to-end run in Claude Code on commons-lang and flask,
-including what went wrong: [docs/e2e-m2.md](docs/e2e-m2.md).
+including what went wrong: [docs/e2e-m2.md](docs/e2e-m2.md); for the git tools,
+[docs/e2e-m3.md](docs/e2e-m3.md).
 
 ## Limitations
 
@@ -63,6 +67,10 @@ including what went wrong: [docs/e2e-m2.md](docs/e2e-m2.md).
 - Tool token counts are estimated as characters / 3 (no offline Claude tokenizer), see
   [ADR-005](docs/adr/005-tool-output-format.md).
 - Outside a git work tree, `.gitignore` is not applied ([ADR-004](docs/adr/004-index-storage-and-incremental-updates.md)).
+- `diff_impact` finds changed symbols exactly (both versions are parsed), but their callers
+  come from the same approximate resolution, from the working tree's index, with no
+  override analysis. `hotspots` counts commits per file, not lines changed. Both need git.
+  Limits: [docs/tools.md](docs/tools.md), [ADR-007](docs/adr/007-diff-impact-and-hotspots.md).
 - Java and Python only.
 
 Indexing speed: about 2.4s for a 50k-line repo, and 7.3s for apache/commons-lang (207k lines).

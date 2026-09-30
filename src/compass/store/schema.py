@@ -13,7 +13,7 @@ why changing one file never requires rewriting rows that belong to another.
 
 # Bump when the schema changes. A mismatch drops and rebuilds the index;
 # the index is a cache, so there are no migrations.
-SCHEMA_VERSION = 2  # 2: imports.is_type_only
+SCHEMA_VERSION = 3  # 2: imports.is_type_only; 3: Python signatures stop at the colon
 
 TABLES = ["symbols_fts", "refs", "imports", "symbols", "files", "meta"]
 TRIGGERS = ["symbols_fts_insert", "symbols_fts_delete"]

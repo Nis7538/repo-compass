@@ -72,8 +72,24 @@ class Resolver:
         self._py_modules: dict[str, bool] = {}
         self._reexports: dict[str, str] = {}
         self._java_types: dict[tuple, str | None] = {}
+        self._virtual: list[SymbolRow] = []
 
     # --- public API ------------------------------------------------------------------
+
+    def add_virtual(self, symbols: list[SymbolRow]) -> None:
+        """Resolve as if these symbols were in the index too.
+
+        diff_impact passes symbols a change removed (rebuilt from the old version of
+        the file, with negative ids), so find_references on one returns the call
+        sites that would still bind to it: uses the change left dangling.
+        """
+        self._virtual.extend(symbols)
+        for s in symbols:
+            self._symbols[s.id] = s
+        self._by_name.clear()
+        self._by_qn.clear()
+        self._reexports.clear()
+        self._java_types.clear()
 
     def resolve_ref(self, ref: RefRow) -> list[Resolution]:
         """Symbols this call site may refer to, all in the best tier found."""
@@ -137,7 +153,11 @@ class Resolver:
                     return LIKELY
                 return POSSIBLE
             target = self._expand_python(receiver, bindings)
-            if target is not None and self._follow_reexport(target) == cand.module:
+            if target is not None and (
+                self._follow_reexport(target) == cand.module
+                # `flask.flash()`: the package re-exports flash from flask.helpers
+                or self._follow_reexport(f"{target}.{ref.name}") == cand.qualified_name
+            ):
                 return EXACT
             return None  # an attribute of something that is not cand's module
 
@@ -298,6 +318,11 @@ class Resolver:
             # Written like a type name (Math, java.util.Collections) but not a type we
             # indexed: a JDK/library class, so it cannot be one of our methods.
             return None
+        if _is_static(cand):
+            # A static method is called through its class. Called on some other
+            # expression (`map.get(k)` vs static `JavaVersion.get(s)`), the name match
+            # is almost always a different method; legal Java, but rare.
+            return POSSIBLE
         return LIKELY if self._java_visible(ref, enclosing, owner) else POSSIBLE
 
     def _java_new_tier(self, ref, cand, enclosing) -> str | None:
@@ -413,6 +438,9 @@ class Resolver:
             self._by_name[key] = [symbol_row(r) for r in rows]
             for s in self._by_name[key]:
                 self._symbols[s.id] = s
+            self._by_name[key] += [
+                v for v in self._virtual if v.language == language and v.name == name
+            ]
         return self._by_name[key]
 
     def _by_qualified(self, qualified_name: str) -> list[SymbolRow]:
@@ -420,7 +448,9 @@ class Resolver:
             rows = self.conn.execute(
                 SYMBOL_SELECT + " WHERE s.qualified_name = ?", (qualified_name,)
             )
-            self._by_qn[qualified_name] = [symbol_row(r) for r in rows]
+            self._by_qn[qualified_name] = [symbol_row(r) for r in rows] + [
+                v for v in self._virtual if v.qualified_name == qualified_name
+            ]
         return self._by_qn[qualified_name]
 
     def _type_by_qn(self, qualified_name: str) -> SymbolRow | None:
@@ -453,6 +483,11 @@ class Resolver:
             if symbol.kind in TYPE_KINDS:
                 classes.append(symbol)
         return classes
+
+
+def _is_static(symbol: SymbolRow) -> bool:
+    """Java: 'static' among the modifiers, i.e. the words before the parameter list."""
+    return "static" in symbol.signature.split("(", 1)[0].split()
 
 
 def _arity_fits(arg_count: int | None, cand: SymbolRow) -> bool:

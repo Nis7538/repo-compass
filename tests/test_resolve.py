@@ -256,3 +256,53 @@ def test_find_symbols_falls_back_to_word_prefix_search(conn):
     assert find_symbols(conn, "stockServ")[0].name == "StockService"
     assert find_symbols(conn, "stock")[0].name == "StockService"  # best-ranked first
     assert find_symbols(conn, "zzz") == []
+
+
+def test_static_method_called_on_an_expression_is_only_possible(tmp_path):
+    # `lookup.get(key)` is Map.get far more often than a static Versions.get called
+    # through an instance; the call through the class stays exact.
+    pkg = tmp_path / "p"
+    pkg.mkdir()
+    (pkg / "Versions.java").write_text(
+        "package p;\n\nclass Versions {\n    static Versions get(String s) { return null; }\n"
+        "    Versions next() { return null; }\n}\n"
+    )
+    (pkg / "Use.java").write_text(
+        "package p;\n\nimport java.util.Map;\n\nclass Use {\n"
+        "    Object f(Map<String, Object> lookup, Versions v) {\n"
+        '        Versions.get("1");\n        v.next();\n        return lookup.get("k");\n'
+        "    }\n}\n"
+    )
+    index_repo(tmp_path, tmp_path / "i.db")
+    conn = open_index(tmp_path / "i.db")
+    try:
+        resolver = Resolver(conn)
+        tiers = {
+            (ref.receiver, ref.name): {r.confidence for r in resolver.resolve_ref(ref)}
+            for ref in (
+                ref_row(r) for r in conn.execute(REF_SELECT + " WHERE f.path = 'p/Use.java'")
+            )
+        }
+    finally:
+        conn.close()
+    assert tiers == {
+        ("Versions", "get"): {"exact"},
+        ("lookup", "get"): {"possible"},
+        ("v", "next"): {"likely"},  # instance methods keep the likely tier
+    }
+
+
+def test_python_call_through_a_package_reexport_is_exact(tmp_path):
+    # flask style: `import flask; flask.flash(...)` where flask/__init__.py re-exports it.
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("from .helpers import flash as flash\n")
+    (tmp_path / "pkg" / "helpers.py").write_text("def flash(message):\n    return message\n")
+    (tmp_path / "use.py").write_text("import pkg\n\npkg.flash('hi')\n")
+    index_repo(tmp_path, tmp_path / "i.db")
+    conn = open_index(tmp_path / "i.db")
+    try:
+        ref = ref_row(conn.execute(REF_SELECT + " WHERE f.path = 'use.py'").fetchone())
+        found = {(r.symbol.qualified_name, r.confidence) for r in Resolver(conn).resolve_ref(ref)}
+    finally:
+        conn.close()
+    assert found == {("pkg.helpers.flash", "exact")}
