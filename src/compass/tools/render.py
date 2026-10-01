@@ -18,6 +18,8 @@ dividing by 3 errs on the side of overestimating (see docs/adr/005).
 
 from dataclasses import dataclass
 
+from compass.tools.caps import MAX_LIMIT
+
 CHARS_PER_TOKEN = 3
 
 # Characters kept free in every response: ~300 for the truncation marker, ~200
@@ -143,3 +145,18 @@ def enforce_cap(text: str, cap_tokens: int) -> str:
             break
         kept.append(line)
     return "\n".join(kept + [marker])
+
+
+def bounded(name: str, value: int, high: int = MAX_LIMIT) -> tuple[int, str | None]:
+    """Clamp a limit into 1..high, and say so when it had to.
+
+    Out-of-range values are clamped, not rejected: the answer is still useful, and
+    the caps bound the size either way. The note tells the agent it did not get
+    what it asked for, so a short answer is not taken for a complete one.
+    """
+    clamped = max(1, min(value, high))
+    if clamped == value:
+        return value, None
+    bound = "maximum" if clamped == high else "minimum"
+    asked = clip(str(value), 12)  # an absurd value must not crowd out the useful part
+    return clamped, clip(f"[{name}={asked} clamped to {clamped}, the {bound}]", NOTE_WIDTH)

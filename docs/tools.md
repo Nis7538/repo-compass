@@ -371,12 +371,42 @@ unless `include_tests=True`, and the header says how many.
 
 ## Git safety
 
-Both git tools only read. `src/compass/gitrepo.py` is the only place that starts git. It
+The git tools only read. `src/compass/gitrepo.py` is the only place that starts git. It
 runs without a shell, with a timeout, with `GIT_OPTIONAL_LOCKS=0` so `.git/index` is not
 refreshed as a side effect, with `--no-pager`, and with `-c core.fsmonitor=false -c
-log.showSignature=false`. `git log` also gets `--no-ext-diff --no-textconv`. Git is never
-asked to read a working-tree file, because a clean filter named in `.gitattributes` would
-run, and no flag turns that off. Working-tree files are hashed in Python instead.
-`tests/test_git_safety.py` sets every one of these hooks to a command that leaves a marker
-file, checks that indexing and both tools leave none, and checks that plain git does fire
-them.
+log.showSignature=false`. `git log`, `git diff` and `git grep` also get `--no-ext-diff`
+and/or `--no-textconv`. Git is never asked to diff a working-tree file, because a clean
+filter named in `.gitattributes` would run, and no flag turns that off. Working-tree files
+are hashed in Python instead. (`git grep` reads working-tree files as they are, without
+filters.) `tests/test_git_safety.py` sets every one of these hooks to a command that leaves
+a marker file, checks that indexing, both tools and the review agent's git calls leave
+none, and checks that plain git does fire them.
+
+## Baseline tools (review agent only)
+
+`compass review --tools baseline` (and `both`) gives the agent four plain tools instead of,
+or next to, the compass tools: roughly what a coding agent has without compass. They are
+not served over MCP. M5 compares the conditions, so these tools follow the same rules as
+the compass tools: plain text, a hard cap per response, out-of-range limits clamped with a
+note, and a `[truncated: N more ...]` line when something is cut. They know nothing about
+symbols, call sites or imports. Code: `src/compass/tools/baseline.py`.
+
+| Tool | Hard cap (tokens) | Arguments |
+|---|---|---|
+| `list_files` | 1,500 | `glob=None, limit=100` (max 500) |
+| `read_file` | 2,000 | `path, start_line=1, max_lines=200` (max 400) |
+| `grep` | 2,000 | `pattern, path=None, fixed=False, limit=50` (max 200) |
+| `git_diff` | 2,000 | `path=None, context=3` (max 10) |
+
+- **What they can see.** Only files git would list: tracked, plus untracked and not
+  ignored. Nothing under `.git/`, nothing ignored (a `.env` file, build output).
+  `read_file` also refuses absolute paths, `..`, symlinks and binary files.
+- `list_files` groups paths by directory. `glob` is matched against the whole path, where
+  `*` also crosses `/` (`*.py`, `src/*`); a glob ending in `/` is a directory.
+- `read_file` prints numbered lines; lines longer than 300 characters are cut, not
+  collapsed, so indentation survives. The marker says where to continue:
+  `[truncated: 120 more lines] start_line=201 continues`.
+- `grep` is `git grep -E` (or `-F` with `fixed`) over the working tree, matches grouped by
+  file in path order, lines clipped at 200 characters. No ranking.
+- `git_diff` is the change under review (merge base to head), whole or for one path. When
+  the cap cuts it, the marker names the files not shown.

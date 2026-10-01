@@ -16,7 +16,17 @@ from mcp import Client
 from compass.index_manager import Freshness
 from compass.indexer.pipeline import index_repo
 from compass.server import build_server
-from compass.tools.caps import CAPS, MAX_BODY_LINES, MAX_LIMIT, STATUS_CAP
+from compass.tools import baseline
+from compass.tools.caps import (
+    BASELINE_CAPS,
+    CAPS,
+    MAX_BODY_LINES,
+    MAX_DIFF_CONTEXT,
+    MAX_FILES_LIMIT,
+    MAX_LIMIT,
+    MAX_READ_LINES,
+    STATUS_CAP,
+)
 from compass.tools.render import STATUS_WIDTH, estimate_tokens
 from tests.gitrepo import ScriptedRepo, hide_git_config
 from tests.stress_corpus import commit_stress_history, write_stress_repo
@@ -119,4 +129,21 @@ async def test_error_and_status_only_answers_fit_the_status_cap(stress_db):
 def test_documented_caps_match_enforced_caps():
     rows = re.findall(r"^\| `(\w+)` \| ([\d,]+) \|", DOCS.read_text(encoding="utf-8"), re.M)
     documented = {tool: int(cap.replace(",", "")) for tool, cap in rows}
-    assert documented == CAPS
+    assert documented == CAPS | BASELINE_CAPS
+
+
+def test_baseline_tools_fit_their_caps_at_the_maximum(stress_db, monkeypatch):
+    hide_git_config(monkeypatch)
+    root, _ = stress_db
+    big = next(root.rglob("Big.java")).relative_to(root).as_posix()
+    calls = [
+        ("list_files", baseline.list_files(root, None, MAX_FILES_LIMIT)),
+        ("read_file", baseline.read_file(root, big, 1, MAX_READ_LINES)),
+        ("grep", baseline.grep(root, "process", None, True, MAX_LIMIT)),
+        ("git_diff", baseline.git_diff(root, "HEAD~1", "HEAD", "x", None, MAX_DIFF_CONTEXT)),
+    ]
+    for tool, text in calls:
+        tokens = estimate_tokens(text)
+        assert tokens <= BASELINE_CAPS[tool], f"{tool}: {tokens} > {BASELINE_CAPS[tool]}"
+        assert "[truncated: " in text, f"{tool}: cut without a marker"
+        assert "[truncated: output cap reached]" not in text, tool

@@ -23,13 +23,13 @@ from compass import __version__
 from compass.index_manager import Freshness, IndexManager
 from compass.paths import default_db_path
 from compass.store.db import open_index
-from compass.tools.caps import CAPS, DEFAULT_BODY_LINES, DEFAULT_LIMIT, MAX_BODY_LINES, MAX_LIMIT
+from compass.tools.caps import CAPS, DEFAULT_BODY_LINES, DEFAULT_LIMIT, MAX_BODY_LINES
 from compass.tools.deps import module_dependencies as deps_tool
 from compass.tools.hotspots import hotspots as hotspots_tool
 from compass.tools.impact import diff_impact as impact_tool
 from compass.tools.outline import file_outline as outline_tool
 from compass.tools.references import find_references as refs_tool
-from compass.tools.render import NOTE_WIDTH, clip, enforce_cap
+from compass.tools.render import bounded, enforce_cap
 from compass.tools.summary import repo_summary as summary_tool
 from compass.tools.symbols import get_symbol as get_symbol_tool
 from compass.tools.symbols import search_symbols as search_tool
@@ -45,21 +45,6 @@ INSTRUCTIONS = (
 )
 
 READ_ONLY = ToolAnnotations(read_only_hint=True)
-
-
-def bounded(name: str, value: int, high: int = MAX_LIMIT) -> tuple[int, str | None]:
-    """Clamp a limit into 1..high, and say so when it had to.
-
-    Out-of-range values are clamped, not rejected: the answer is still useful, and
-    the caps bound the size either way. The note tells the agent it did not get
-    what it asked for, so a short answer is not taken for a complete one.
-    """
-    clamped = max(1, min(value, high))
-    if clamped == value:
-        return value, None
-    bound = "maximum" if clamped == high else "minimum"
-    asked = clip(str(value), 12)  # an absurd value must not crowd out the useful part
-    return clamped, clip(f"[{name}={asked} clamped to {clamped}, the {bound}]", NOTE_WIDTH)
 
 
 def build_server(
