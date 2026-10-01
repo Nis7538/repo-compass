@@ -8,11 +8,13 @@ Every git process starts in run(), which makes these guarantees:
   can name commands that git runs on its own: an fsmonitor hook, an external diff,
   textconv and clean filters (named in .gitattributes), a pager, gpg for signature
   checks. run() turns off fsmonitor and signature display with `-c`, and passes
-  --no-pager. No call here asks git for a patch, so external diffs and textconv
-  never run; `git log` passes --no-ext-diff --no-textconv anyway. Clean filters run
-  whenever git reads a working-tree file, and no flag turns them off, so git is
-  never asked to read one: working-tree files are hashed here, in Python
-  (blob_id), and compared with the committed blob ids.
+  --no-pager. Every call that can produce a patch or search content (`git log`,
+  `git diff`, `git grep`) passes --no-ext-diff and/or --no-textconv, so external
+  diffs and textconv never run. Patches are only asked for between two commits,
+  never against the working tree: clean filters run whenever git reads a
+  working-tree file for a diff, and no flag turns them off. Working-tree files are
+  hashed here instead, in Python (blob_id), and compared with the committed blob
+  ids. `git grep` does read working-tree files, but as they are, without filters.
 - Nothing is written. GIT_OPTIONAL_LOCKS=0 stops commands that would otherwise
   refresh .git/index as a side effect, and no command used here writes anything else.
 - Bounded time: each git call has a timeout.
@@ -356,3 +358,89 @@ def log_touches(root: Path, revisions: list[str], max_commits: int) -> list[Comm
                 i += 2
         commits.append(Commit(sha, int(ct), tuple(touches)))
     return commits
+
+
+# --- patches and search (the review agent) -------------------------------------------
+
+DIFF_FLAGS = ("--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--relative")
+
+
+@dataclass(frozen=True)
+class NumStat:
+    path: str
+    added: int | None  # None for a binary file
+    deleted: int | None
+
+
+def numstat(root: Path, base: str, head: str) -> list[NumStat]:
+    """Lines added and deleted per file between two commits, in git's path order."""
+    out = run(root, "diff", *DIFF_FLAGS, "--numstat", "-z", base, head, "--")
+    stats = []
+    for entry in out.decode("utf-8", errors="replace").split("\0"):
+        if not entry:
+            continue
+        added, deleted, path = entry.split("\t", 2)
+        stats.append(NumStat(path, _count(added), _count(deleted)))
+    return stats
+
+
+def _count(field: str) -> int | None:
+    return None if field == "-" else int(field)
+
+
+def patch(root: Path, base: str, head: str, path: str | None = None, context: int = 3) -> str:
+    """Unified diff between two commits, of everything or of one path.
+
+    Commits only: a patch against the working tree would make git run clean filters.
+    """
+    if path is not None and path.startswith("-"):
+        raise GitError(f'Refusing path "{path}": git would read a leading "-" as an option.')
+    args = ["diff", *DIFF_FLAGS, f"-U{context}", base, head, "--"]
+    if path:
+        args.append(path)
+    return run(root, *args).decode("utf-8", errors="replace")
+
+
+@dataclass(frozen=True)
+class GrepHit:
+    path: str
+    line: int
+    text: str
+
+
+def grep(root: Path, pattern: str, path: str | None = None, fixed: bool = False) -> list[GrepHit]:
+    """Lines matching pattern in tracked and untracked-but-not-ignored text files.
+
+    The pattern goes after -e and the path after --, so neither can be read as an
+    option. Binary files are skipped (-I). No match is an empty list; a bad regular
+    expression raises GitError.
+    """
+    args = [
+        "grep",
+        "--no-color",
+        "--no-textconv",
+        "--untracked",
+        "--exclude-standard",
+        "-n",
+        "-z",
+        "-I",
+        "-F" if fixed else "-E",
+        "-e",
+        pattern,
+        "--",
+        path or ".",
+    ]
+    try:
+        out = run(root, *args)
+    except GitCommandFailed as exc:
+        if exc.returncode == 1:  # no match
+            return []
+        raise
+    hits = []
+    for line in out.decode("utf-8", errors="replace").split("\n"):
+        if not line:
+            continue
+        file, _, rest = line.partition("\0")
+        number, _, text = rest.partition("\0")
+        hits.append(GrepHit(file, int(number), text.rstrip("\r")))
+    return hits

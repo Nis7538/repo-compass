@@ -189,3 +189,82 @@ def test_approxidate(repo):
     repo.write("a.py", "a = 1\n")
     repo.commit("one")
     assert gitrepo.approxidate(repo.root, "2026-01-01 00:00:00 +0000") == 1767225600
+
+
+def _two_commits(repo: ScriptedRepo) -> tuple[str, str]:
+    repo.write("app/a.py", "def f():\n    return 1\n")
+    repo.write("app/b.py", "x = 1\n")
+    repo.write("logo.bin", "\0\1\2")
+    base = repo.commit("one")
+    repo.write("app/a.py", "def f():\n    return 2\n\n\ndef g():\n    return 3\n")
+    repo.remove("app/b.py")
+    repo.write("app/c.py", "y = 2\n")
+    repo.write("logo.bin", "\0\1\3")
+    return base, repo.commit("two")
+
+
+def test_numstat_between_commits(repo):
+    base, head = _two_commits(repo)
+    stats = gitrepo.numstat(repo.root, base, head)
+    assert stats == [
+        gitrepo.NumStat("app/a.py", 5, 1),
+        gitrepo.NumStat("app/b.py", 0, 1),
+        gitrepo.NumStat("app/c.py", 1, 0),
+        gitrepo.NumStat("logo.bin", None, None),
+    ]
+
+
+def test_patch_of_everything_and_of_one_path(repo):
+    base, head = _two_commits(repo)
+    whole = gitrepo.patch(repo.root, base, head)
+    assert "diff --git a/app/a.py b/app/a.py" in whole
+    assert "deleted file mode" in whole
+    assert "+def g():" in whole
+    one = gitrepo.patch(repo.root, base, head, "app/a.py", context=0)
+    assert one.startswith("diff --git a/app/a.py b/app/a.py")
+    assert "app/c.py" not in one
+    assert "-    return 1\n+    return 2\n" in one
+
+
+def test_patch_paths_are_relative_to_a_subdirectory_root(repo):
+    base, head = _two_commits(repo)
+    sub = gitrepo.patch(repo.root / "app", base, head)
+    assert "diff --git a/a.py b/a.py" in sub
+    assert "logo.bin" not in sub
+    assert [s.path for s in gitrepo.numstat(repo.root / "app", base, head)] == [
+        "a.py",
+        "b.py",
+        "c.py",
+    ]
+
+
+def test_patch_refuses_a_path_starting_with_a_dash(repo):
+    base, head = _two_commits(repo)
+    with pytest.raises(GitError, match="leading"):
+        gitrepo.patch(repo.root, base, head, "--output=x")
+
+
+def test_grep_finds_tracked_and_untracked_text_files(repo):
+    _two_commits(repo)
+    repo.write("app/new.py", "def g():  # untracked\n")
+    repo.write(".gitignore", "ignored.py\n")
+    repo.write("ignored.py", "def g():\n")
+    hits = gitrepo.grep(repo.root, r"def g\(")
+    assert [(h.path, h.line) for h in hits] == [("app/a.py", 5), ("app/new.py", 1)]
+    assert hits[0].text == "def g():"
+    assert gitrepo.grep(repo.root, "def g(", fixed=True) == hits
+    assert gitrepo.grep(repo.root, "def", path="app/new.py") == [hits[1]]
+    assert gitrepo.grep(repo.root, "nothing matches this") == []
+
+
+def test_grep_pattern_starting_with_a_dash_is_a_pattern(repo):
+    repo.write("a.py", "x = 1  # --version\n")
+    repo.commit("one")
+    assert [h.line for h in gitrepo.grep(repo.root, "--version", fixed=True)] == [1]
+
+
+def test_grep_bad_regex_raises_git_error(repo):
+    repo.write("a.py", "x = 1\n")
+    repo.commit("one")
+    with pytest.raises(GitError, match="git grep failed"):
+        gitrepo.grep(repo.root, "(unclosed")

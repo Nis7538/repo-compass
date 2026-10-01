@@ -3,8 +3,8 @@
 .git/config (and .gitattributes) can name commands git runs by itself: an fsmonitor
 hook, an external diff, a textconv driver, a clean filter, gpg for signatures, a
 pager. Each is set here to a Python command (sys.executable, so the test works on
-Windows and Linux) that creates a marker file. Indexing and both git tools must
-leave no marker.
+Windows and Linux) that creates a marker file. Indexing, both git tools and the
+review agent's git calls (patch, numstat, grep) must leave no marker.
 
 The positive control runs plain git commands, without compass's flags, and checks
 that every marker does appear, so the test cannot pass just because the hooks were
@@ -16,6 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from compass import gitrepo
 from compass.indexer.pipeline import index_repo
 from compass.store.db import open_index
 from compass.tools.hotspots import hotspots
@@ -106,7 +107,13 @@ def test_hostile_git_config_runs_nothing(tmp_path):
         spots = hotspots(conn, "2000-01-01", 10, False)
     finally:
         conn.close()
+    patch = gitrepo.patch(repo.root, "HEAD~1", "HEAD")
+    stats = gitrepo.numstat(repo.root, "HEAD~1", "HEAD")
+    hits = gitrepo.grep(repo.root, "return 3")  # reads the working tree
     assert sorted(p.name for p in markers.iterdir()) == []
+    assert "-    return 1\n+    return 2" in patch
+    assert stats == [gitrepo.NumStat("app.py", 1, 1)]
+    assert [(h.path, h.text) for h in hits] == [("app.py", "    return 3")]
     # The tools did real work, not an early error.
     assert worktree.startswith("diff HEAD~1...working tree")
     assert "body function f" in worktree
