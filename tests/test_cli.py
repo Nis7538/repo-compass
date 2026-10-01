@@ -1,9 +1,14 @@
-"""`compass index` and `compass symbol` through typer's CliRunner."""
+"""`compass index`, `compass symbol` and `compass review` through typer's CliRunner."""
+
+import json
+import sys
 
 import pytest
 from typer.testing import CliRunner
 
+from compass import cli
 from compass.cli import app
+from tests.fake_anthropic import FakeClient, Text, ToolUse, reply
 from tests.helpers import FIXTURES
 
 runner = CliRunner()
@@ -88,3 +93,113 @@ def test_symbol_without_index_explains_what_to_do(tmp_path):
     result = runner.invoke(app, ["symbol", "x", "--db", str(tmp_path / "none.db")])
     assert result.exit_code == 1
     assert "Run: compass index" in result.output
+
+
+# --- compass review, with a scripted client in place of the Claude API ------------------
+
+
+@pytest.fixture
+def fake_api(monkeypatch):
+    clients = []
+
+    def make(script):
+        def factory():
+            client = FakeClient(list(script))
+            clients.append(client)
+            return client
+
+        monkeypatch.setattr(cli, "make_client", factory)
+        return clients
+
+    monkeypatch.delenv("COMPASS_MODEL", raising=False)
+    return make
+
+
+def _review(shop, tmp_path, *args):
+    repo, _ = shop
+    return runner.invoke(
+        app,
+        [
+            "review",
+            "--repo",
+            str(repo.root),
+            "--log",
+            str(tmp_path / "runs.jsonl"),
+            "--transcript",
+            str(tmp_path / "t.json"),
+            "--db",
+            str(tmp_path / "i.db"),
+            *args,
+        ],
+    )
+
+
+def test_review_prints_the_review_and_a_summary_line(shop, tmp_path, fake_api):
+    clients = fake_api(
+        [reply(ToolUse("t1", "list_files", {"glob": "*.py"})), reply(Text("## Summary\nok"))]
+    )
+    result = _review(shop, tmp_path, "--tools", "baseline", "--max-cost", "0.5")
+    assert result.exit_code == 0, result.output
+    assert result.stdout.startswith("## Summary\nok\n")
+    assert "[baseline] 2 turns; tool calls: list_files 1;" in result.stderr
+    assert "of $0.50; stop: end_turn" in result.stderr
+    request = clients[0].requests[0]
+    assert request["model"] == "claude-opus-5-5"
+    assert request["max_tokens"] <= 16000  # the default, cut to what $0.50 allows
+    record = json.loads((tmp_path / "runs.jsonl").read_text(encoding="utf-8"))
+    assert (record["tools_mode"], record["max_cost_usd"], record["max_turns"]) == (
+        "baseline",
+        0.5,
+        20,
+    )
+
+
+def test_review_model_comes_from_the_environment(shop, tmp_path, fake_api, monkeypatch):
+    clients = fake_api([reply(Text("review"))])
+    monkeypatch.setenv("COMPASS_MODEL", "claude-sonnet-5-5")
+    assert _review(shop, tmp_path, "--tools", "none").exit_code == 0
+    assert clients[0].requests[0]["model"] == "claude-sonnet-5-5"
+    _review(shop, tmp_path, "--tools", "none", "--model", "claude-haiku-4-5")
+    assert clients[1].requests[0]["model"] == "claude-haiku-4-5"
+
+
+def test_review_writes_to_out_but_never_inside_the_repo(shop, tmp_path, fake_api):
+    fake_api([reply(Text("review text"))])
+    out = tmp_path / "review.md"
+    assert _review(shop, tmp_path, "--tools", "none", "--out", str(out)).exit_code == 0
+    assert out.read_text(encoding="utf-8") == "review text\n"
+    inside = shop[0].root / "review.md"
+    result = _review(shop, tmp_path, "--tools", "none", "--out", str(inside))
+    assert result.exit_code == 2
+    assert "Refusing to write the review inside the repository" in result.stderr
+    assert not inside.exists()
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--tools", "shell"], "choose one of none, baseline, compass, both"),
+        (["--model", "claude-imaginary-9"], "No price for model 'claude-imaginary-9'"),
+        (["--base", "nope"], 'Unknown ref "nope"'),
+        (["--max-tokens", "500"], "--max-tokens"),
+    ],
+)
+def test_review_rejects_bad_options(shop, tmp_path, fake_api, args, message):
+    fake_api([])
+    result = _review(shop, tmp_path, *args)
+    assert result.exit_code == 2
+    assert message in result.output
+
+
+def test_review_fails_when_the_api_fails(shop, tmp_path, fake_api):
+    fake_api([ConnectionError("down")])
+    result = _review(shop, tmp_path, "--tools", "none")
+    assert result.exit_code == 1
+    assert "error: ConnectionError: down" in result.stderr
+
+
+def test_review_without_the_agent_extra_says_how_to_install_it(shop, tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "anthropic", None)  # import anthropic -> ImportError
+    result = _review(shop, tmp_path, "--tools", "none")
+    assert result.exit_code == 2
+    assert "uv sync --extra agent" in result.stderr

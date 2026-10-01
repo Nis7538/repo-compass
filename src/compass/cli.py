@@ -1,5 +1,6 @@
 """CLI entry point for repo-compass."""
 
+import os
 from pathlib import Path
 
 import typer
@@ -19,6 +20,10 @@ app = typer.Typer(
 )
 
 DB_OPTION = typer.Option(None, "--db", help="Index file (default: per-repo file in user cache).")
+DEFAULT_MODEL = "claude-opus-5-5"
+# The anthropic SDK refuses non-streaming requests that could run past 10 minutes,
+# which it estimates from max_tokens (about 21,000 and up).
+MAX_RESPONSE_TOKENS = 21000
 
 
 @app.command()
@@ -108,6 +113,115 @@ def serve(
     from compass.server import build_server  # the MCP SDK is only needed here
 
     build_server(repo, db).run("stdio")
+
+
+def make_client():
+    """The Claude API client. Tests replace this function with a scripted fake."""
+    try:
+        import anthropic
+    except ImportError:
+        typer.echo(
+            "compass review calls the Claude API and needs the optional anthropic SDK:"
+            " run `uv sync --extra agent`.",
+            err=True,
+        )
+        raise typer.Exit(2) from None
+    return anthropic.Anthropic()  # credentials from the environment, never from here
+
+
+@app.command()
+def review(
+    base: str = typer.Option("main", "--base", help="Branch or commit the change is based on."),
+    head: str = typer.Option("HEAD", "--head", help="The change; must be checked out."),
+    repo: Path = typer.Option(Path("."), "--repo", help="Repository to review."),
+    tools: str = typer.Option(
+        "compass", "--tools", help="Tools the agent gets: compass, baseline, both or none."
+    ),
+    model: str | None = typer.Option(
+        None, "--model", help=f"Claude model (default: $COMPASS_MODEL, else {DEFAULT_MODEL})."
+    ),
+    max_turns: int = typer.Option(20, "--max-turns", min=1, help="API requests, at most."),
+    max_tokens: int = typer.Option(
+        16000,
+        "--max-tokens",
+        min=1024,
+        max=MAX_RESPONSE_TOKENS,
+        help="Output tokens per response (thinking included).",
+    ),
+    max_cost: float = typer.Option(
+        1.00, "--max-cost", min=0.01, help="Hard cap on the run's cost in US dollars."
+    ),
+    out: Path | None = typer.Option(None, "--out", help="Write the review here, not stdout."),
+    log: Path | None = typer.Option(None, "--log", help="Run log (default: user cache dir)."),
+    transcript: Path | None = typer.Option(
+        None, "--transcript", help="Transcript file (default: user cache dir)."
+    ),
+    no_transcript: bool = typer.Option(False, "--no-transcript", help="Write no transcript."),
+    db: Path | None = DB_OPTION,
+) -> None:
+    """Review the change base...head with Claude and print a Markdown review."""
+    from compass.agent.loop import Limits
+    from compass.agent.pricing import UnknownModelError
+    from compass.agent.review import ReviewError, run_review
+    from compass.agent.runlog import inside
+    from compass.agent.toolsets import MODES
+
+    if tools not in MODES:
+        raise typer.BadParameter(f"choose one of {', '.join(MODES)}", param_hint="--tools")
+    if not repo.is_dir():
+        raise typer.BadParameter(f"not a directory: {repo}", param_hint="--repo")
+    if out is not None and inside(out, repo):
+        typer.echo(f"Refusing to write the review inside the repository: {out}", err=True)
+        raise typer.Exit(2)
+    model = model or os.environ.get("COMPASS_MODEL") or DEFAULT_MODEL
+    limits = Limits(max_turns=max_turns, max_tokens=max_tokens, max_cost_usd=max_cost)
+    client = make_client()
+    try:
+        run = run_review(
+            client,
+            repo,
+            base,
+            head,
+            tools,
+            model,
+            limits,
+            db_path=db,
+            log_path=log,
+            transcript_path=transcript,
+            write_transcript=not no_transcript,
+        )
+    except (ReviewError, UnknownModelError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
+
+    record = run.record
+    if record["dirty"]:
+        typer.echo(
+            "warning: the working tree has uncommitted changes; the tools saw them, the diff"
+            " did not.",
+            err=True,
+        )
+    if out is not None:
+        out.write_text(run.result.text + "\n", encoding="utf-8")
+    elif run.result.text:
+        typer.echo(run.result.text)
+    calls = ", ".join(f"{name} {n}" for name, n in record["tool_calls"].items()) or "none"
+    prompt = (
+        record["input_tokens"]
+        + record["cache_creation_input_tokens"]
+        + record["cache_read_input_tokens"]
+    )
+    typer.echo(
+        f"[{tools}] {record['turns']} turns; tool calls: {calls}; tokens in {prompt}"
+        f" (cache read {record['cache_read_input_tokens']}) out {record['output_tokens']};"
+        f" ${record['cost_usd']:.3f} of ${max_cost:.2f}; stop: {record['stop_reason']}"
+        + (" after a wrap-up" if record["wrap_up"] else ""),
+        err=True,
+    )
+    if record["error"]:
+        typer.echo(f"error: {record['error']}", err=True)
+    if not run.result.text or record["stop_reason"] == "error":
+        raise typer.Exit(1)
 
 
 def format_symbol(sym: SymbolRow) -> str:
