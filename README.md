@@ -2,12 +2,12 @@
 
 An MCP server that gives coding agents structural understanding of a codebase — symbols, references, module dependencies, diff impact, hotspots — plus an eval harness that measures whether it actually helps.
 
-> Under construction. See [PLAN.md](PLAN.md) for the roadmap. Done so far: M0 (scaffold), M1 (indexer), M2 (MCP server), M3 (git-aware tools).
+> Under construction. See [PLAN.md](PLAN.md) for the roadmap. Done so far: M0 (scaffold), M1 (indexer), M2 (MCP server), M3 (git-aware tools), M4 (review agent).
 
 ## Install
 
 ```bash
-uv sync                 # add --extra agent for the anthropic SDK (API scripts only)
+uv sync                 # add --extra agent for the anthropic SDK (compass review, API scripts)
 ```
 
 ## Usage
@@ -54,6 +54,35 @@ tool with an explicit `[truncated: N more]` line. Formats, ranking rules and tok
 including what went wrong: [docs/e2e-m2.md](docs/e2e-m2.md); for the git tools,
 [docs/e2e-m3.md](docs/e2e-m3.md).
 
+## Review a change with Claude
+
+`compass review` asks Claude for a Markdown review of a change (summary, risks,
+breaking-change candidates, tests worth adding), letting it call tools in a loop. It needs
+the optional SDK (`uv sync --extra agent`) and an API key in `ANTHROPIC_API_KEY`.
+
+```bash
+uv run compass review --repo path/to/repo --base main --head HEAD
+uv run compass review --repo path/to/repo --tools baseline --max-cost 0.50 --out review.md
+```
+
+- `--head` must be the checked-out commit: the tools read the working tree.
+- `--tools compass` (default), `baseline` (plain list/read/grep/diff tools), `both`, or
+  `none` (the diff only). The prompt, model and limits are the same in all four; that is
+  what the M5 evaluation compares.
+- Limits: `--max-turns` (20), `--max-tokens` per response (16,000), and `--max-cost`
+  (US$1.00), a hard cap checked before every request. `--model` defaults to
+  `$COMPASS_MODEL`, else `claude-opus-5-5`; models without a known price are refused.
+- Every run appends one JSON line (turns, tool calls, tokens, cost, wall time, stop reason)
+  to `runs.jsonl` and writes a transcript, both in your user cache directory
+  (`--log`, `--transcript`, `--no-transcript` to change that).
+- **Transcripts contain repository content** (the diff, file text, tool answers). Keep
+  them out of version control and do not share them for private code. compass refuses to
+  write them, the log, or `--out` inside the reviewed repository.
+- Repository content is treated as untrusted: the agent's tools are read-only, it has no
+  shell, and the cost cap bounds a run. A malicious diff can still mislead the review.
+  How the loop and the cap work: [ADR-008](docs/adr/008-review-agent-loop.md). Real runs:
+  [docs/e2e-m4.md](docs/e2e-m4.md).
+
 ## Limitations
 
 - **Reference resolution is approximate.** It uses names, imports, packages and scopes, not
@@ -71,6 +100,9 @@ including what went wrong: [docs/e2e-m2.md](docs/e2e-m2.md); for the git tools,
   come from the same approximate resolution, from the working tree's index, with no
   override analysis. `hotspots` counts commits per file, not lines changed. Both need git.
   Limits: [docs/tools.md](docs/tools.md), [ADR-007](docs/adr/007-diff-impact-and-hotspots.md).
+- `compass review` can only review the checked-out commit, and its cost cap relies on a
+  token estimate that errs high for code (ADR-008). A turn that hits `--max-tokens` ends
+  the run.
 - Java and Python only.
 
 Indexing speed: about 2.4s for a 50k-line repo, and 7.3s for apache/commons-lang (207k lines).
